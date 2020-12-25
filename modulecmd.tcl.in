@@ -26,8 +26,6 @@
 array set g_state_defs [list\
    autoinit {0}\
    clock_seconds {<undef> initStateClockSeconds}\
-   cmdline {<undef>}\
-   cwd {<undef>}\
    domainname {<undef> {runCommand domainname}}\
    error_count {0}\
    extra_siteconfig_loaded {0}\
@@ -47,18 +45,12 @@ array set g_state_defs [list\
    osversion [list $::tcl_platform(osVersion)]\
    paginate {<undef> initStatePaginate}\
    path_separator {<undef> initStatePathSeparator}\
-   rc_loaded {<undef>}\
    report_format {plain}\
-   report_sep_next {<undef>}\
    reportfd {stderr initStateReportfd}\
    return_false {0}\
-   shell {<undef>}\
-   shelltype {<undef>}\
    siteconfig_loaded {0}\
    sub1_separator {&}\
    sub2_separator {|}\
-   subcmd {<undef>}\
-   subcmd_args {<undef>}\
    tcl_ext_lib_loaded {0}\
    tcl_version [list [info patchlevel]]\
    tcl_version_lt85 {<undef> initStateTclVersionLt85}\
@@ -85,6 +77,8 @@ array set g_config_defs [list\
    home {MODULESHOME @moduleshome@ 0}\
    icase {MODULES_ICASE @icase@ 0 {never search always}}\
    ignored_dirs {{} {CVS RCS SCCS .svn .git .SYNC .sos} 0}\
+   implicit_requirement {MODULES_IMPLICIT_REQUIREMENT @implicitrequirement@ 0\
+      {0 1}}\
    locked_configs {{} {@lockedconfigs@} 0}\
    ml {MODULES_ML @ml@ 0 {0 1}}\
    nearly_forbidden_days {MODULES_NEARLY_FORBIDDEN_DAYS @nearlyforbiddendays@\
@@ -92,6 +86,7 @@ array set g_config_defs [list\
    pager {MODULES_PAGER {@pagercmd@} 0}\
    rcfile {MODULERCFILE <undef> 0}\
    run_quarantine {MODULES_RUN_QUARANTINE <undef> 0}\
+   shells_with_ksh_fpath {MODULES_SHELLS_WITH_KSH_FPATH {} 0}\
    silent_shell_debug {MODULES_SILENT_SHELL_DEBUG <undef> 0 {0 1}}\
    siteconfig {{} @etcdir@/siteconfig.tcl 0}\
    tcl_ext_lib {{} {} 0 {} {} initConfTclExtLib}\
@@ -112,8 +107,13 @@ array set g_config_defs [list\
 # Get state value
 proc getState {state {valifundef {}} {catchinitproc 0}} {
    if {![info exists ::g_states($state)]} {
-      # fetch state properties (including its default value)
-      lassign $::g_state_defs($state) value initproclist
+      # fetch state properties (including its default value) if defined
+      if {[info exists ::g_state_defs($state)]} {
+         lassign $::g_state_defs($state) value initproclist
+      } else {
+         set value <undef>
+         set initproclist {}
+      }
 
       # call specific proc to initialize state if any
       if {$initproclist ne {}} {
@@ -157,10 +157,36 @@ proc setState {state value} {
 
 # Append each passed value to the existing state value list
 proc lappendState {state args} {
-   # retrieve current value through getState to initialize it if still undef
-   set value [getState $state]
-   eval appendNoDupToList value $args
-   setState $state $value
+   if {$state eq {-nodup}} {
+      set state [lindex $args 0]
+      # retrieve current val through getState to initialize it if still undef
+      set value [getState $state]
+      eval appendNoDupToList value [lrange $args 1 end]
+      setState $state $value
+   } else {
+      eval lappend ::g_states($state) $args
+      reportDebug "$state appended with '$args'"
+   }
+}
+
+# Remove last element from state value list
+proc lpopState {state args} {
+   setState $state [lrange [getState $state] 0 end-1]
+}
+
+# Return first element from state value list
+proc topState {state} {
+   return [lindex [getState $state] 0]
+}
+
+# Return last element from state value list
+proc currentState {state} {
+   return [lindex [getState $state] end]
+}
+
+# Get number of element from state value list
+proc depthState {state} {
+   return [llength [getState $state]]
 }
 
 # Check if state has been defined
@@ -385,7 +411,7 @@ proc __initStateClockSeconds {} {
 
 # Know if Tcl version is below 8.5.0
 proc initStateTclVersionLt85 {} {
-   return [expr {[compareVersion [getState tcl_version] 8.5.0] == -1}]
+   return [expr {[versioncmp [getState tcl_version] 8.5.0] == -1}]
 }
 
 # Initialize Select Graphic Rendition table
@@ -527,7 +553,8 @@ proc isIcase {} {
    # depending on current sub-command, list values that equal to a case
    # insensitive match enablement
    lappend enabledValList always
-   if {[isInList [list avail whatis search paths] [currentCommandName]]} {
+   if {[isInList [list avail whatis search paths] [currentState\
+      commandname]]} {
       lappend enabledValList search
    }
    return [isInList $enabledValList [getConf icase]]
@@ -688,7 +715,7 @@ proc reportDebug {message {showcaller 1} {caller _undef_}} {
 # regular procedure to use once error report is initialized
 proc __reportDebug {message {showcaller 1} {caller _undef_}} {
    # display active interp details if not the main one
-   set prefix [currentDebugMsgPrefix]
+   set prefix [currentState debug_msg_prefix]
    # display caller name as prefix
    if {$showcaller && $caller ne {} && ($caller ne {_undef_} || [info level]\
       > 1)} {
@@ -723,7 +750,7 @@ proc __reportError {message {recordtop 0} {severity ERROR} {sgrkey er}\
       }
       set msgsgr "[sgr $sgrkey $severity]: $message"
       # record message to report it later on if a record id is found
-      if {[currentMsgRecordId] ne {}} {
+      if {[currentState msgrecordid] ne {}} {
          recordMessage $msgsgr $recordtop
       # skip message report if silent
       } elseif {[isVerbosityLevel concise]} {
@@ -784,13 +811,13 @@ proc reportTraceExecEnter {cmdstring op} {
 
 # is currently active message record id at top level
 proc isMsgRecordIdTop {} {
-   return [expr {[llength $::g_msgRecordIdStack] eq 1}]
+   return [expr {[depthState msgrecordid] eq 1}]
 }
 
 # record messages on the eventual additional module evaluations that have
 # occurred during the current evaluation
 proc reportModuleEval {} {
-   set evalid [currentEvalId]
+   set evalid [currentState evalid]
    array set contexttitle {conun {Unloading conflict} reqlo {Loading\
       requirement} depre {Reloading dependent} depun {Unloading dependent}\
       urequn {Unloading useless requirement}}
@@ -810,7 +837,7 @@ proc reportModuleEval {} {
 
 # render messages related to current record id under an header block
 proc reportMsgRecord {header} {
-   set recid [currentMsgRecordId]
+   set recid [currentState msgrecordid]
    if {[info exists ::g_msgRecord($recid)]} {
       # skip message report if silent
       if {[isVerbosityLevel concise]} {
@@ -887,8 +914,8 @@ proc reportSeparateNextContent {} {
 # regular procedure to use once error report is initialized
 proc __reportSeparateNextContent {} {
    # hold or apply
-   if {[isReportHeld]} {
-      lappend ::g_holdReport([currentReportHoldId]) [list\
+   if {[depthState reportholdid] > 0} {
+      lappend ::g_holdReport([currentState reportholdid]) [list\
          reportSeparateNextContent]
    } else {
       setState report_sep_next 1
@@ -897,8 +924,8 @@ proc __reportSeparateNextContent {} {
 
 # save message for block rendering
 proc recordMessage {message {recordtop 0}} {
-   lappend ::g_msgRecord([expr {$recordtop ? [topMsgRecordId] :\
-      [currentMsgRecordId]}]) $message
+   lappend ::g_msgRecord([expr {$recordtop ? [topState msgrecordid] :\
+      [currentState msgrecordid]}]) $message
 }
 
 # filter and format error stack trace to only report useful content
@@ -1006,9 +1033,9 @@ proc report {message {nonewline 0} {immed 0} {padnl 0}} {
 # regular procedure to use once error report is initialized
 proc __report {message {nonewline 0} {immed 0} {padnl 0}} {
    # hold or print output
-   if {!$immed && [isReportHeld]} {
-      lappend ::g_holdReport([currentReportHoldId]) [list report $message\
-         $nonewline $immed $padnl]
+   if {!$immed && [depthState reportholdid] > 0} {
+      lappend ::g_holdReport([currentState reportholdid]) [list report\
+         $message $nonewline $immed $padnl]
    } else {
       # produce blank line prior message if asked to
       if {[isStateDefined reportfd] && [isStateDefined report_sep_next]} {
@@ -1124,10 +1151,10 @@ proc initErrorReport {} {
       # trace each procedure call
       if {[isVerbosityLevel debug2]} {
          # exclude core procedure from tracing
-         set excl_prc_list [list report reportDebug currentDebugMsgPrefix\
-            reportTraceExecEnter isInList notInList getState setState\
-            lappendState unsetState isStateDefined isStateEqual sgr getConf\
-            setConf unsetConf lappendConf]
+         set excl_prc_list [list report reportDebug reportTraceExecEnter\
+            isInList notInList getState setState unsetState lappendState\
+            lpopState currentState depthState isStateDefined isStateEqual sgr\
+            getConf setConf unsetConf lappendConf]
          foreach prc [info procs] {
             if {[notInList $excl_prc_list $prc]} {
                trace add execution $prc enter reportTraceExecEnter
@@ -1281,7 +1308,7 @@ proc get-env {var {valifunset {}}} {
 }
 
 proc set-env {var val} {
-   set mode [currentMode]
+   set mode [currentState mode]
    reportDebug "$var=$val"
 
    # an empty string value means unsetting variable on Windows platform, so
@@ -1313,7 +1340,7 @@ proc reset-to-unset-env {var {val {}}} {
 }
 
 proc unset-env {var {internal 0} {val {}}} {
-   set mode [currentMode]
+   set mode [currentState mode]
    reportDebug "$var (internal=$internal, val=$val)"
 
    # clear value instead of unset it not to break variable later reference
@@ -1378,11 +1405,11 @@ proc initModfileModeAliases {mode aliasesVN aliasesPassArgVN tracesVN} {
    upvar #0 $tracesVN traces
 
    if {![info exists g_modfilePerModeAliases]} {
-      set ::g_modfileBaseAliases [list getenv getenv is-loaded is-loaded\
-         is-saved is-saved is-used is-used is-avail is-avail uname uname\
-         module-info module-info exit exitModfileCmd reportCmdTrace\
-         reportCmdTrace reportInternalBug reportInternalBug reportWarning\
-         reportWarning reportError reportError raiseErrorCount\
+      set ::g_modfileBaseAliases [list versioncmp versioncmp getenv getenv\
+         is-loaded is-loaded is-saved is-saved is-used is-used is-avail\
+         is-avail uname uname module-info module-info exit exitModfileCmd\
+         reportCmdTrace reportCmdTrace reportInternalBug reportInternalBug\
+         reportWarning reportWarning reportError reportError raiseErrorCount\
          raiseErrorCount report report isVerbosityLevel isVerbosityLevel\
          isWin initStateIsWin puts putsModfileCmd readModuleContent\
          readModuleContent formatErrStackTrace formatErrStackTrace]
@@ -1443,11 +1470,12 @@ x-resource     {x-resource     x-resource     reportCmd      nop            nop 
 }
 
 proc execute-modulefile {modfile modname modspec {must_have_cookie 1}} {
-   pushModuleFile $modfile
-   pushModuleName $modname
-   pushSpecifiedName $modspec
-   set mode [currentMode]
-   pushDebugMsgPrefix [getEvalModuleStackDepth] $mode $modname
+   lappendState modulefile $modfile
+   lappendState modulename $modname
+   lappendState specifiedname $modspec
+   set mode [currentState mode]
+   lappendState debug_msg_prefix\
+      "\[#[depthState modulename]:$mode:$modname\] "
 
    # skip modulefile if interpretation has been inhibited
    if {[getState inhibit_interp]} {
@@ -1472,7 +1500,7 @@ proc execute-modulefile {modfile modname modspec {must_have_cookie 1}} {
    }
    # dedicate an interpreter per mode and per level of interpretation to have
    # a dedicated interpreter in case of cascaded multi-mode interpretations
-   set itrp __modfile_${mode}_[getEvalModuleStackDepth]
+   set itrp __modfile_${mode}_[depthState modulename]
 
    # evaluation mode-specific configuration
    set dumpCommandsVN g_modfile${mode}Commands
@@ -1487,6 +1515,10 @@ proc execute-modulefile {modfile modname modspec {must_have_cookie 1}} {
    if {![interp exists $itrp]} {
       reportDebug "creating interp $itrp"
       interp create $itrp
+
+      # record module tool properties
+      interp eval $itrp set ::ModuleTool Modules
+      interp eval $itrp set ::ModuleToolVersion {@MODULES_RELEASE@}
 
       # dump initial interpreter state to restore it before each modulefile
       # interpretation. use same dump state for all modes/levels
@@ -1592,10 +1624,10 @@ proc execute-modulefile {modfile modname modspec {must_have_cookie 1}} {
    }]
 
    reportDebug "exiting $modfile"
-   popDebugMsgPrefix
-   popSpecifiedName
-   popModuleName
-   popModuleFile
+   lpopState debug_msg_prefix
+   lpopState specifiedname
+   lpopState modulename
+   lpopState modulefile
 
    return $errorVal
 }
@@ -1603,12 +1635,12 @@ proc execute-modulefile {modfile modname modspec {must_have_cookie 1}} {
 # Smaller subset than main module load... This function runs modulerc and
 # .version files
 proc execute-modulerc {modfile modname modspec} {
-   pushModuleFile $modfile
+   lappendState modulefile $modfile
    # push name to be found by module-alias and version
-   pushModuleName $modname
-   pushSpecifiedName $modspec
+   lappendState modulename $modname
+   lappendState specifiedname $modspec
    set ::ModulesVersion {}
-   pushDebugMsgPrefix [getEvalModuleStackDepth] $modname
+   lappendState debug_msg_prefix "\[#[depthState modulename]:$modname\] "
 
    if {![info exists ::g_modrcUntrackVars]} {
       # list variable that should not be tracked for saving
@@ -1619,14 +1651,15 @@ proc execute-modulerc {modfile modname modspec} {
       array set ::g_modrcRenameCmds [list]
 
       # list interpreter alias commands to define
-      array set ::g_modrcAliases [list uname uname system system chdir\
-         nop is-loaded is-loaded module-version module-version module-alias\
-         module-alias module-virtual module-virtual module-forbid\
-         module-forbid module-hide module-hide module nop module-info\
-         module-info module-trace nop module-verbosity nop module-user nop\
-         module-log nop reportInternalBug reportInternalBug setModulesVersion\
-         setModulesVersion readModuleContent readModuleContent\
-         formatErrStackTrace formatErrStackTrace]
+      array set ::g_modrcAliases [list uname uname system system versioncmp\
+         versioncmp chdir nop is-loaded is-loaded module-version\
+         module-version module-alias module-alias module-virtual\
+         module-virtual module-forbid module-forbid module-hide module-hide\
+         module nop module-info module-info module-trace nop module-verbosity\
+         nop module-user nop module-log nop reportInternalBug\
+         reportInternalBug setModulesVersion setModulesVersion\
+         readModuleContent readModuleContent formatErrStackTrace\
+         formatErrStackTrace]
 
       # alias commands where an argument should be passed
       array set ::g_modrcAliasesPassArg [list]
@@ -1637,13 +1670,17 @@ proc execute-modulerc {modfile modname modspec} {
 
    # dedicate an interpreter per level of interpretation to have in case of
    # cascaded interpretations a specific interpreter per level
-   set itrp __modrc_[getEvalModuleStackDepth]
+   set itrp __modrc_[depthState modulename]
 
    reportTrace '$modfile' {Evaluate modulerc}
    # create modulerc interpreter at first interpretation
    if {![interp exists $itrp]} {
       reportDebug "creating interp $itrp"
       interp create $itrp
+
+      # record module tool properties
+      interp eval $itrp set ::ModuleTool Modules
+      interp eval $itrp set ::ModuleToolVersion {@MODULES_RELEASE@}
 
       # dump initial interpreter state to restore it before each modulerc
       # interpreation. use same dump state for all levels
@@ -1700,10 +1737,10 @@ proc execute-modulerc {modfile modname modspec} {
       }
    }
 
-   popDebugMsgPrefix
-   popSpecifiedName
-   popModuleName
-   popModuleFile
+   lpopState debug_msg_prefix
+   lpopState specifiedname
+   lpopState modulename
+   lpopState modulefile
 
    return $::ModulesVersion
 }
@@ -1853,15 +1890,30 @@ proc resetInterpState {itrp fresh dumpVarsVN dumpArrayVarsVN untrackVarsVN\
 # commands run from inside a module file
 #
 
+# Dictionary-style string comparison
+# Use dictionary sort of lsort proc to compare two strings in the "string
+# compare" fashion (returning -1, 0 or 1). Tcl dictionary-style comparison
+# enables to compare software versions (ex: "1.10" is greater than "1.8")
+proc versioncmp {str1 str2} {
+   if {$str1 eq $str2} {
+      return 0
+   # put both strings in a list, then lsort it and get first element
+   } elseif {[lindex [lsort -dictionary [list $str1 $str2]] 0] eq $str1} {
+      return -1
+   } else {
+      return 1
+   }
+}
+
 proc module-info {what {more {}}} {
-   set mode [currentMode]
+   set mode [currentState mode]
 
    reportDebug "$what $more"
 
    switch -- $what {
       mode {
          if {$more ne {}} {
-            set command [currentCommandName]
+            set command [currentState commandname]
             return [expr {$mode eq $more || ($more eq {remove} && $mode eq \
                {unload}) || ($more eq {switch} && $command eq {switch})}]
          } else {
@@ -1869,7 +1921,7 @@ proc module-info {what {more {}}} {
          }
       }
       command {
-         set command [currentCommandName]
+         set command [currentState commandname]
          if {$more eq {}} {
             return $command
          } else {
@@ -1877,10 +1929,10 @@ proc module-info {what {more {}}} {
          }
       }
       name {
-         return [currentModuleName]
+         return [currentState modulename]
       }
       specified {
-         return [currentSpecifiedName]
+         return [currentState specifiedname]
       }
       shell {
          if {$more ne {}} {
@@ -2054,7 +2106,7 @@ proc findModulepathFromModulefile {modfile} {
 # current modulefile directory (useful for module-version and module-alias
 # for instance).
 proc getModuleNameVersion {{name {}} {name_relative_tocur 0}} {
-   set curmod [currentModuleName]
+   set curmod [currentState modulename]
    set curmodname [file dirname $curmod]
    set curmodversion [file tail $curmod]
 
@@ -2066,7 +2118,7 @@ proc getModuleNameVersion {{name {}} {name_relative_tocur 0}} {
    } elseif {$curmod ne {} && [regexp {^\.?\/(.*)$} $name match version]} {
       # if we cannot distinguish a module name, raise error when shorthand
       # version notation is used
-      if {$::ModulesCurrentModulefile ne $curmod && $curmod ne {.modulerc}} {
+      if {[currentState modulefile] ne $curmod && $curmod ne {.modulerc}} {
          # name is the name of current module directory
          set name $curmodname
       } else {
@@ -2235,7 +2287,7 @@ proc setModuleResolution {mod target {symver {}} {override_res_path 1}\
                set modvers $modresname/$symelt
                reportDebug "module-version $modvers = $modres"
                set ::g_moduleVersion($modvers) $modres
-               set ::g_sourceVersion($modvers) $::ModulesCurrentModulefile
+               set ::g_sourceVersion($modvers) [currentState modulefile]
                # record eventual missing resolution
                if {![info exists g_moduleResolved($modvers)]} {
                   set g_moduleResolved($modvers) $modres
@@ -2272,7 +2324,7 @@ proc setModuleResolution {mod target {symver {}} {override_res_path 1}\
 }
 
 # retrieve all names that resolve to passed mod
-proc getAllModuleResolvedName {mod {flag_autosym 0} {modspec {}}} {
+proc getAllModuleResolvedName {mod {flag_type 0} {modspec {}}} {
    set namelist {}
    set resmodlist {}
    set icase [isIcase]
@@ -2315,8 +2367,11 @@ proc getAllModuleResolvedName {mod {flag_autosym 0} {modspec {}}} {
                $modelt $mod eqstart] || $::g_moduleResolved($resmod) eq $mod\
                || $mod eq [lindex [getPathToModule\
                $::g_moduleResolved($resmod) {} 0] 1])} {
-               # prefix automatically generated symbols with 'as|' if asked
-               if {$flag_autosym && [info exists ::g_autoSymbol($resmod)]} {
+               # prefix automatically generated syms with type flag if asked
+               if {$flag_type && [info exists ::g_moduleAlias($resmod)]} {
+                  appendNoDupToList namelist al|$resmod
+               } elseif {$flag_type && [info exists\
+                  ::g_autoSymbol($resmod)]} {
                   appendNoDupToList namelist as|$resmod
                } else {
                   appendNoDupToList namelist $resmod
@@ -2370,7 +2425,7 @@ proc module-alias {args} {
 
    if {[setModuleResolution $alias $mod]} {
       set ::g_moduleAlias($alias) $mod
-      set ::g_sourceAlias($alias) $::ModulesCurrentModulefile
+      set ::g_sourceAlias($alias) [currentState modulefile]
    }
 
    return {}
@@ -2383,7 +2438,7 @@ proc module-virtual {args} {
    reportDebug "$mod = $modfile"
 
    set ::g_moduleVirtual($mod) $modfile
-   set ::g_sourceVirtual($mod) $::ModulesCurrentModulefile
+   set ::g_sourceVirtual($mod) [currentState modulefile]
 
    return {}
 }
@@ -2575,11 +2630,11 @@ proc module-hide {args} {
 }
 
 proc module {command args} {
-   set mode [currentMode]
+   set mode [currentState mode]
    reportDebug "cmd='$command', args='$args'"
 
    # guess if called from top level
-   set topcall [expr {[getEvalModuleStackDepth] == 0}]
+   set topcall [expr {[depthState modulename] == 0}]
    set tryhelpmsg [expr {$topcall ? "\nTry 'module --help' for more\
       information." : {}}]
    if {$topcall} {
@@ -2601,9 +2656,9 @@ proc module {command args} {
 
    # parse options, do that globally to ignore options not related to a given
    # module sub-command (exclude them from arg list)
-   lassign [eval parseModuleCommandArgs $command $args] show_oneperline\
-      show_mtime show_filter search_filter search_match dump_state\
-      addpath_pos args
+   lassign [eval parseModuleCommandArgs $topcall $command $args]\
+      show_oneperline show_mtime show_filter search_filter search_match\
+      dump_state addpath_pos not_req args
 
    # parse module version specification
    if {[isInList [list avail paths whatis load unload switch help test\
@@ -2622,9 +2677,13 @@ proc module {command args} {
       }
       # other commands can only be called from modulefile evaluated from
       # command acting as top-level context (source and autoinit)
-      if {([getEvalModuleStackDepth] > 1 || [notInList [list source autoinit]\
-         [currentCommandName]]) && $command eq {config}} {
+      if {([depthState modulename] > 1 || [notInList [list source autoinit]\
+         [currentState commandname]]) && $command eq {config}} {
          knerror "${msgprefix}Command '$command' not supported$tryhelpmsg"
+      }
+      # no requirement should be recorded this module load/unload/switch cmd
+      if {$not_req || ![getConf implicit_requirement]} {
+         lappendState inhibit_req_record [currentState evalid]
       }
    }
 
@@ -2678,9 +2737,9 @@ proc module {command args} {
    }
 
    # define if modfile should always be fully read even for validity check
-   pushAlwaysReadFullFile [expr {![isInList [list path paths list avail\
-      aliases] $command]}]
-   pushCommandName $command
+   lappendState always_read_full_file [expr {![isInList [list path paths list\
+      avail aliases] $command]}]
+   lappendState commandname $command
 
    if {$topcall} {
       # Find and execute any global rc file found
@@ -2697,7 +2756,7 @@ proc module {command args} {
             set ret 0
             # if top command is source, consider module load commands made
             # within sourced file evaluation as top load command
-            if {$topcall || ([getEvalModuleStackDepth] == 1 && (
+            if {$topcall || ([depthState modulename] == 1 && (
                [aboveCommandName] eq {source} || [aboveCommandName] eq\
                {autoinit}))} {
                set ret [eval cmdModuleLoad load 1 $args]
@@ -2725,15 +2784,16 @@ proc module {command args} {
                   prereq $arg
                }
             # mods unload is handled via UReqUn mechanism when auto enabled
-            # also unloads are triggered by ongoing reload, purge or
-            # restore commands
-            } elseif {![getConf auto_handling] && [notInList [list purge\
-               reload restore] [aboveCommandName]]} {
+            # (unless if implicit_requirement has been inhibited) also unloads
+            # are triggered by ongoing reload, purge or restore commands
+            } elseif {(![getConf auto_handling] || [getState\
+               inhibit_req_record] eq [currentState evalid]) && [notInList\
+               [list purge reload restore] [aboveCommandName]]} {
                # on unload mode, unload mods in reverse order, if loaded
                # prior this mod, if not user asked and not required by
                # other loaded mods
                set modlist [getLoadedModuleList]
-               set modidx [lsearch -exact $modlist [currentModuleName]]
+               set modidx [lsearch -exact $modlist [currentState modulename]]
                if {$modidx != 0} {
                   set priormodlist [lrange $modlist 0 $modidx]
                   foreach arg [lreverse $args] {
@@ -2756,7 +2816,7 @@ proc module {command args} {
       unload {
          # if top command is source, consider module load commands made
          # within sourced file evaluation as top load command
-         if {$topcall || ([getEvalModuleStackDepth] == 1 && (
+         if {$topcall || ([depthState modulename] == 1 && (
             [aboveCommandName] eq {source} || [aboveCommandName] eq\
             {autoinit}))} {
             set ret [eval cmdModuleUnload unload match 1 0 0 0 $args]
@@ -2802,7 +2862,7 @@ proc module {command args} {
       }
       switch {
          # pass 'user asked state' to switch procedure
-         set uasked [expr {$topcall || ([getEvalModuleStackDepth] == 1 &&\
+         set uasked [expr {$topcall || ([depthState modulename] == 1 &&\
             ([aboveCommandName] eq {source} || [aboveCommandName] eq\
             {autoinit}))}]
          if {$uasked} {
@@ -2829,15 +2889,18 @@ proc module {command args} {
                   # 'module unload' for an unload evaluation: nothing done
                   # for switched-off module and unload of switched-on
                   # module. If auto handling is enabled switched-on module
-                  # is handled via UReqUn mechanism. Also unloads are
+                  # is handled via UReqUn mechanism (unless if
+                  # implicit_requirement has been inhibited). Also unloads are
                   # triggered by ongoing reload, purge or restore commands
-                  if {![getConf auto_handling] && $swlomod ne {} &&\
-                     [notInList [list purge reload restore]\
+                  if {(![getConf auto_handling] || [getState\
+                     inhibit_req_record] eq [currentState evalid]) &&\
+                     $swlomod ne {} && [notInList [list purge reload restore]\
                      [aboveCommandName]]} {
                      # unload mod if it was loaded prior this mod, not user
                      # asked and not required by another loaded module
                      set modlist [getLoadedModuleList]
-                     set modidx [lsearch -exact $modlist [currentModuleName]]
+                     set modidx [lsearch -exact $modlist [currentState\
+                        modulename]]
                      if {$modidx != 0} {
                         set priormodlist [lrange $modlist 0 $modidx]
                         if {[set unmod [getLoadedMatchingName $swlomod {} 0\
@@ -2947,8 +3010,12 @@ proc module {command args} {
          eval cmdModuleResurface module-info loaded $args
       }
    }
-   popCommandName
-   popAlwaysReadFullFile
+   lpopState commandname
+   lpopState always_read_full_file
+
+   if {!$topcall && ($not_req || ![getConf implicit_requirement])} {
+      lpopState inhibit_req_record
+   }
 
    # if called from top level render settings if any
    if {$topcall} {
@@ -2961,9 +3028,9 @@ proc module {command args} {
 proc ml {args} {
    # filter out all known options from argument list to guess command name
    # without them in the way
-   lassign [eval parseModuleCommandArgs ml $args] show_oneperline\
+   lassign [eval parseModuleCommandArgs 1 ml $args] show_oneperline\
       show_mtime show_filter search_filter search_match dump_state\
-      addpath_pos fargs
+      addpath_pos not_req fargs
 
    # determine if first argument is a known module sub-command
    lassign [parseModuleCommandName [lindex $fargs 0] list] command cmdvalid\
@@ -2993,8 +3060,8 @@ proc ml {args} {
       lassign [eval parseModuleVersionSpecifier 1 $fargs] modunlist modlolist
 
       # define if modfile should always be fully read even for validity check
-      pushAlwaysReadFullFile 1
-      pushCommandName ml
+      lappendState always_read_full_file 1
+      lappendState commandname ml
 
       # Find and execute any global rc file found
       runModulerc
@@ -3017,8 +3084,8 @@ proc ml {args} {
       }
       popSettings
 
-      popCommandName
-      popAlwaysReadFullFile
+      lpopState commandname
+      lpopState always_read_full_file
 
       renderSettings
    }
@@ -3077,7 +3144,7 @@ proc setenv-wh {var args} {
 proc getenv {var {valifundef _UNDEFINED_}} {
    reportDebug "var='$var', valifundef='$valifundef'"
 
-   if {[currentMode] ne {display}} {
+   if {[currentState mode] ne {display}} {
       return [get-env $var $valifundef]
    } else {
       return "\$$var"
@@ -3113,7 +3180,7 @@ proc chdir {dir} {
    } else {
       # report issue but does not treat it as an error to have the
       # same behavior as C-version
-      reportWarning "Cannot chdir to '$dir' for '[currentModuleName]'"
+      reportWarning "Cannot chdir to '$dir' for '[currentState modulename]'"
    }
 
    return {}
@@ -3124,7 +3191,7 @@ proc chdir {dir} {
 proc exitModfileCmd {{code 0}} {
    reportDebug ($code)
 
-   if {[currentMode] eq {load}} {
+   if {[currentState mode] eq {load}} {
       setState inhibit_interp 1
    }
 
@@ -3623,7 +3690,7 @@ proc is-loading {args} {
 
 proc conflict {args} {
    reportDebug $args
-   set currentModule [currentModuleName]
+   set currentModule [currentState modulename]
    # get module short name if loaded by its full pathname
    if {[set isfullpath [isModuleFullPath $currentModule]]} {
       set currentSModule [findModuleNameFromModulefile $currentModule]
@@ -3633,8 +3700,10 @@ proc conflict {args} {
    # parse module version specification
    set args [eval parseModuleVersionSpecifier 0 $args]
 
-   # register conflict list
-   eval setLoadedConflict "{$currentModule}" $args
+   # register conflict list unless record inhibited for current iterp context
+   if {[currentState inhibit_req_record] != [currentState evalid]} {
+      eval setLoadedConflict "{$currentModule}" $args
+   }
 
    foreach mod $args {
       # if the conflict module is loading and it does not correspond to
@@ -3647,7 +3716,8 @@ proc conflict {args} {
          set retisconun [isModuleEvaluated conun $currentModule $mod]
          # report message on currently evaluated module message block
          if {![set retiseval [isModuleEvaluated any $currentModule $mod]] ||\
-            [currentMsgRecordId] ne [topMsgRecordId] || !$retisconun} {
+            [currentState msgrecordid] ne [topState msgrecordid] ||\
+            !$retisconun} {
             # more appropriate msg if an eval was attempted or is by-passed
             set msg [expr {$retiseval || [getState force] ?\
                [getConIsLoadedMsg [list $mod] $isloading] :\
@@ -3670,13 +3740,16 @@ proc conflict {args} {
 
 proc prereq {args} {
    reportDebug $args
-   set currentModule [currentModuleName]
+   set currentModule [currentState modulename]
 
    # parse module version specification
    set args [eval parseModuleVersionSpecifier 0 $args]
 
    # register prereq list (sets of optional prereq are registered as list)
-   setLoadedPrereq $currentModule $args
+   # unless record inhibited for current iterp context
+   if {[currentState inhibit_req_record] != [currentState evalid]} {
+      setLoadedPrereq $currentModule $args
+   }
 
    # if dependency resolving is enabled try to load prereq
    if {[getConf auto_handling] && ![eval is-loaded $args] && ![eval\
@@ -3691,16 +3764,16 @@ proc prereq {args} {
          # hold output of each evaluation until they are all done to drop
          # those that failed if one succeed
          set curholdid load-$i-$arg
-         pushReportHoldId $curholdid
+         lappendState reportholdid $curholdid
          if {[catch {cmdModuleLoad reqlo 0 $arg} errorMsg]} {
             # if an error is raised, release output and rethrow the error
             # (could be raised if no modulepath defined for instance)
-            popReportHoldId
+            lpopState reportholdid
             lappend holdidlist $curholdid report
             eval releaseHeldReport $holdidlist
             knerror $errorMsg
          }
-         popReportHoldId
+         lpopState reportholdid
 
          if {[is-loaded $arg]} {
             set prereqloaded 1
@@ -3722,7 +3795,7 @@ proc prereq {args} {
       set retisreqlo [eval isModuleEvaluated reqlo "{$currentModule}" $args]
       # report message on currently evaluated module message block
       if {![set retiseval [eval isModuleEvaluated any "{$currentModule}"\
-         $args]] || [currentMsgRecordId] ne [topMsgRecordId] ||\
+         $args]] || [currentState msgrecordid] ne [topState msgrecordid] ||\
          !$retisreqlo} {
 
          # more appropriate msg if an evaluation was attempted or is by-passed
@@ -3787,7 +3860,7 @@ proc x-resource {resource {value {}}} {
 
    # if a resource does hold an empty value in g_newXResources or
    # g_delXResources arrays, it means this is a resource file to parse
-   if {[currentMode] eq {load}} {
+   if {[currentState mode] eq {load}} {
       set ::g_newXResources($resource) $value
    } else {
       set ::g_delXResources($resource) $value
@@ -3814,7 +3887,7 @@ proc uname {what} {
 proc system {args} {
    reportDebug $args
 
-   set mode [currentMode]
+   set mode [currentState mode]
    set status {}
 
    switch -- $mode {
@@ -4205,7 +4278,7 @@ proc source-sh {shell script args} {
    set modcontent [eval sh-to-mod $shtomodargs]
 
    # register resulting modulefile commands
-   setLoadedSourceSh [currentModuleName] [concat [list $shtomodargs]\
+   setLoadedSourceSh [currentState modulename] [concat [list $shtomodargs]\
       $modcontent]
 
    # evaluate resulting modulefile commands
@@ -4217,7 +4290,7 @@ proc source-sh {shell script args} {
 # undo source-sh in unload mode
 proc source-sh-un {shell script args} {
    set shtomodargs [concat [list $shell $script] $args]
-   set modsrcsh [getLoadedSourceSh [currentModuleName]]
+   set modsrcsh [getLoadedSourceSh [currentState modulename]]
 
    # find commands resulting from source-sh evaluation recorded in env
    if {[set idx [lsearch -exact $modsrcsh $shtomodargs]] != -1 } {
@@ -4227,7 +4300,7 @@ proc source-sh-un {shell script args} {
    }
 
    # get name of current module unload Tcl interp
-   set itrp __modfile_[currentMode]_[getEvalModuleStackDepth]
+   set itrp __modfile_[currentState mode]_[depthState modulename]
 
    # evaluate each recorded command in unload Tcl interp to get them reversed
    foreach modcmd $modcontent {
@@ -4240,8 +4313,8 @@ proc source-sh-di {shell script args} {
    set shtomodargs [concat [list $shell $script] $args]
 
    # if module loaded, get as much content from environment as possible
-   if {[is-loaded [currentModuleName]]} {
-      set modsrcsh [getLoadedSourceSh [currentModuleName]]
+   if {[is-loaded [currentState modulename]]} {
+      set modsrcsh [getLoadedSourceSh [currentState modulename]]
 
       # find commands resulting from source-sh evaluation recorded in env
       if {[set idx [lsearch -exact $modsrcsh $shtomodargs]] != -1 } {
@@ -4287,7 +4360,7 @@ proc source-sh-di {shell script args} {
    }
 
    # get name of current module unload Tcl interp
-   set itrp __modfile_[currentMode]_[getEvalModuleStackDepth]
+   set itrp __modfile_[currentState mode]_[depthState modulename]
 
    # evaluate each recorded command in display Tcl interp to get them printed
    foreach modcmd $modcontent {
@@ -4298,165 +4371,43 @@ proc source-sh-di {shell script args} {
 ########################################################################
 # internal module procedures
 #
-set g_modeStack {}
-
-proc currentMode {} {
-   return [lindex $::g_modeStack end]
-}
-
-proc pushMode {mode} {
-   lappend ::g_modeStack $mode
-}
-
-proc popMode {} {
-   set ::g_modeStack [lrange $::g_modeStack 0 end-1]
-}
-
-set g_moduleNameStack {}
-
-proc currentModuleName {} {
-   return [lindex $::g_moduleNameStack end]
-}
-
-proc pushModuleName {moduleName} {
-   lappend ::g_moduleNameStack $moduleName
-}
-
-proc popModuleName {} {
-   set ::g_moduleNameStack [lrange $::g_moduleNameStack 0 end-1]
-}
-
-# get number of either modulefile/modulerc currently being evaluated
-proc getEvalModuleStackDepth {} {
-   return [llength $::g_moduleNameStack]
-}
-
-set g_moduleFileStack {}
-
-proc pushModuleFile {modfile} {
-   lappend ::g_moduleFileStack $modfile
-   set ::ModulesCurrentModulefile $modfile
-}
-
-proc popModuleFile {} {
-   set ::g_moduleFileStack [lrange $::g_moduleFileStack 0 end-1]
-   set ::ModulesCurrentModulefile [lindex $::g_moduleFileStack end]
-}
-
-set g_specifiedNameStack {}
-
-proc currentSpecifiedName {} {
-   return [lindex $::g_specifiedNameStack end]
-}
-
-proc pushSpecifiedName {specifiedName} {
-   lappend ::g_specifiedNameStack $specifiedName
-}
-
-proc popSpecifiedName {} {
-   set ::g_specifiedNameStack [lrange $::g_specifiedNameStack 0 end-1]
-}
-
-set g_commandNameStack {}
-
-proc currentCommandName {} {
-   return [lindex $::g_commandNameStack end]
-}
 
 proc aboveCommandName {} {
-   return [lindex $::g_commandNameStack end-1]
-}
-
-proc pushCommandName {commandName} {
-   lappend ::g_commandNameStack $commandName
-}
-
-proc popCommandName {} {
-   set ::g_commandNameStack [lrange $::g_commandNameStack 0 end-1]
+   return [lindex [getState commandname] end-1]
 }
 
 proc ongoingCommandName {commandName} {
-   return [expr {[lsearch -exact $::g_commandNameStack $commandName] != -1}]
+   return [expr {[lsearch -exact [getState commandname] $commandName] != -1}]
 }
-
-# stack of report holder unique identifiers
-set g_reportHoldIdStack {}
-
-proc isReportHeld {} {
-   return [expr {[llength $::g_reportHoldIdStack] > 0}]
-}
-
-proc currentReportHoldId {} {
-   return [lindex $::g_reportHoldIdStack end]
-}
-
-proc pushReportHoldId {holdid} {
-   lappend ::g_reportHoldIdStack $holdid
-}
-
-proc popReportHoldId {} {
-   set ::g_reportHoldIdStack [lrange $::g_reportHoldIdStack 0 end-1]
-}
-
 
 # stack of message recording/eval unique identifiers
-set g_evalIdStack {}
-set g_msgRecordIdStack {}
-
-proc currentMsgRecordId {} {
-   return [lindex $::g_msgRecordIdStack end]
-}
-
-proc currentEvalId {} {
-   return [lindex $::g_evalIdStack end]
-}
-
-proc topMsgRecordId {} {
-   return [lindex $::g_msgRecordIdStack 0]
-}
-
-proc topEvalId {} {
-   return [lindex $::g_evalIdStack 0]
-}
-
 proc pushMsgRecordId {recid {setmsgid 1}} {
-   lappend ::g_evalIdStack $recid
+   lappendState evalid $recid
    if {$setmsgid} {
-      lappend ::g_msgRecordIdStack $recid
+      lappendState msgrecordid $recid
    }
 }
 
 proc popMsgRecordId {{setmsgid 1}} {
-   set ::g_evalIdStack [lrange $::g_evalIdStack 0 end-1]
+   lpopState evalid
    if {$setmsgid} {
-      set ::g_msgRecordIdStack [lrange $::g_msgRecordIdStack 0 end-1]
+      lpopState msgrecordid
    }
 }
 
 proc clearAllMsgRecordId {} {
-   set ::g_evalIdStack {}
-   set ::g_msgRecordIdStack {}
-}
-
-# stack of prefixes clarifying debug message entries
-set g_debugMsgPrefixStack {}
-
-proc currentDebugMsgPrefix {} {
-   return [lindex $::g_debugMsgPrefixStack end]
-}
-
-proc pushDebugMsgPrefix {args} {
-   lappend ::g_debugMsgPrefixStack "\[#[join $args :]\] "
-}
-
-proc popDebugMsgPrefix {} {
-   set ::g_debugMsgPrefixStack [lrange $::g_debugMsgPrefixStack 0 end-1]
+   if {[isStateDefined evalid]} {
+      unsetState evalid
+   }
+   if {[isStateDefined msgrecordid]} {
+      unsetState msgrecordid
+   }
 }
 
 # gather for the current top evaluation the information on all evaluations
 # happening under its umbrella
 proc registerModuleEval {context mod {unset 0} {failedcontext {}}} {
-   set evalid [topEvalId]
+   set evalid [topState evalid]
    set contextset 0
 
    # add mod to existing evaluation context list
@@ -4491,7 +4442,7 @@ proc registerModuleEval {context mod {unset 0} {failedcontext {}}} {
 
 # get context of currently evaluated module
 proc currentModuleEvalContext {} {
-   return [lindex $::g_moduleEvalAttempt([currentModuleName]) end]
+   return [lindex $::g_moduleEvalAttempt([currentState modulename]) end]
 }
 
 # record module evaluation attempt and corresponding context
@@ -4541,7 +4492,7 @@ proc isModuleEvaluated {context exclmod args} {
 # was passed mod already evaluated for context and failed
 proc isModuleEvalFailed {context mod} {
    set ret 0
-   set evalid [topEvalId]
+   set evalid [topState evalid]
    if {[info exists ::g_moduleFailedEval($evalid)]} {
       foreach {curcon curmod} $::g_moduleFailedEval($evalid) {
          if {$context eq $curcon && $mod eq $curmod} {
@@ -4553,31 +4504,12 @@ proc isModuleEvalFailed {context mod} {
    return $ret
 }
 
-# stack of flag defining whether a modfile should be always fully read or not
-# even for validity check, which is useful in case a file need to be read
-# multiple times as a full read will make file content cached thus file will
-# be read only once
-set g_alwaysReadFullFileStack {}
-
-proc currentAlwaysReadFullFile {} {
-   return [lindex $::g_alwaysReadFullFileStack end]
-}
-
-proc pushAlwaysReadFullFile {alwaysReadFullFile} {
-   lappend ::g_alwaysReadFullFileStack $alwaysReadFullFile
-}
-
-proc popAlwaysReadFullFile {} {
-   set ::g_alwaysReadFullFileStack [lrange $::g_alwaysReadFullFileStack 0\
-      end-1]
-}
-
 # return list of currently loading modules in stack
 proc getLoadingModuleList {} {
    set modlist [list]
-   for {set i 0} {$i < [llength $::g_moduleNameStack]} {incr i 1} {
-      if {[lindex $::g_modeStack $i] eq {load}} {
-         lappend modlist [lindex $::g_moduleNameStack $i]
+   for {set i 0} {$i < [depthState modulename]} {incr i 1} {
+      if {[lindex [getState mode] $i] eq {load}} {
+         lappend modlist [lindex [getState modulename] $i]
       }
    }
    return $modlist
@@ -4586,9 +4518,9 @@ proc getLoadingModuleList {} {
 # return list of currently loading modulefiles in stack
 proc getLoadingModuleFileList {} {
    set modlist [list]
-   for {set i 0} {$i < [llength $::g_moduleFileStack]} {incr i 1} {
-      if {[lindex $::g_modeStack $i] eq {load}} {
-         lappend modlist [lindex $::g_moduleFileStack $i]
+   for {set i 0} {$i < [depthState modulefile]} {incr i 1} {
+      if {[lindex [getState mode] $i] eq {load}} {
+         lappend modlist [lindex [getState modulefile] $i]
       }
    }
    return $modlist
@@ -4597,9 +4529,9 @@ proc getLoadingModuleFileList {} {
 # return list of currently unloading modules in stack
 proc getUnloadingModuleList {} {
    set modlist [list]
-   for {set i 0} {$i < [llength $::g_moduleNameStack]} {incr i 1} {
-      if {[lindex $::g_modeStack $i] eq {unload}} {
-         lappend modlist [lindex $::g_moduleNameStack $i]
+   for {set i 0} {$i < [depthState modulename]} {incr i 1} {
+      if {[lindex [getState mode] $i] eq {unload}} {
+         lappend modlist [lindex [getState modulename] $i]
       }
    }
    return $modlist
@@ -4938,40 +4870,31 @@ proc setModspecHidingLevel {modspec lvl} {
 # current search query and hiding threshold. when retdetails option is
 # enabled, mod hiding level and query match hind are also returned
 proc isModuleHidden {mod {modspec {}} {retdetails 0}} {
-   set testid $mod:$modspec:$retdetails
-   # returned saved result if already tested
-   if {[info exists ::g_isModuleHiddenMemCache($testid)]} {
-      return $::g_isModuleHiddenMemCache($testid)
+   if {[set hidlvl [getModuleHidingLevel $mod]] >= [getState\
+      hiding_threshold]} {
+      # soft hidden mods are considered matched if their root name matches
+      # search query, other kind of hidden most must fuly matches query
+      set hidmatch [expr {$hidlvl == 0 ? [expr {[modStartNb $mod $modspec]\
+         > 0}] : [modEq $modspec $mod eqspec]}]
    } else {
-      if {[set hidlvl [getModuleHidingLevel $mod]] >= [getState\
-         hiding_threshold]} {
-         # soft hidden mods are considered matched if their root name matches
-         # search query, other kind of hidden most must fuly matches query
-         set hidmatch [expr {$hidlvl == 0 ? [expr {[modStartNb $mod $modspec]\
-            > 0}] : [modEq $modspec $mod eqspec]}]
-      } else {
-         set hidlvl -1
-         set hidmatch 0
-      }
-      if {$hidlvl < 1 && [isModuleDotHidden $mod] && [getState\
-         hiding_threshold] < 1} {
-         set hidlvl 1
-         # dot hidden are considered matched if remaining string part after
-         # search query is not dot hidden
-         set hidmatch [expr {[set i [modStartNb $mod $modspec]] > 0 &&\
-            ![isModuleDotHidden [join [lrange [file split $mod] $i end] /]]}]
-      }
-      # hidden if hiding level greater or equal hiding threshold and not
-      # matched or if matched hard hiding level are kept hidden
-      set ishid [expr {$hidlvl != -1 && (!$hidmatch || $hidlvl > 1)}]
-
-      set ret [expr {$retdetails ? [list $hidlvl $hidmatch $ishid] : $ishid}]
-
-      # cache test result
-      set ::g_isModuleHiddenMemCache($testid) $ret
-
-      return $ret
+      set hidlvl -1
+      set hidmatch 0
    }
+   if {$hidlvl < 1 && [isModuleDotHidden $mod] && [getState\
+      hiding_threshold] < 1} {
+      set hidlvl 1
+      # dot hidden are considered matched if remaining string part after
+      # search query is not dot hidden
+      set hidmatch [expr {[set i [modStartNb $mod $modspec]] > 0 &&\
+         ![isModuleDotHidden [join [lrange [file split $mod] $i end] /]]}]
+   }
+   # hidden if hiding level greater or equal hiding threshold and not
+   # matched or if matched hard hiding level are kept hidden
+   set ishid [expr {$hidlvl != -1 && (!$hidmatch || $hidlvl > 1)}]
+
+   set ret [expr {$retdetails ? [list $hidlvl $hidmatch $ishid] : $ishid}]
+
+   return $ret
 }
 
 # check if module name is specified as a full pathname (not a name relative
@@ -5615,11 +5538,21 @@ proc getLoadedPrereq {mod {serialized 0}} {
 
 proc setLoadedAltname {mod args} {
    foreach arg $args {
+      switch -- [string range $arg 0 2] {
+         al| {
+            appendNoDupToList ::g_loadedModuleAliasAltname($mod) [string\
+               range $arg 3 end]
+         }
+         as| {
+            appendNoDupToList ::g_loadedModuleAutoAltname($mod) [string range\
+               $arg 3 end]
+         }
+         default {
+            appendNoDupToList ::g_loadedModuleAltname($mod) $arg
+         }
+      }
       if {[string range $arg 0 2] eq {as|}} {
-         appendNoDupToList ::g_loadedModuleAutoAltname($mod) [string range\
-            $arg 3 end]
       } else {
-         appendNoDupToList ::g_loadedModuleAltname($mod) $arg
       }
    }
 }
@@ -5628,18 +5561,35 @@ proc unsetLoadedAltname {mod} {
    if {[info exists ::g_loadedModuleAltname($mod)]} {
       unset ::g_loadedModuleAltname($mod)
    }
+   if {[info exists ::g_loadedModuleAliasAltname($mod)]} {
+      unset ::g_loadedModuleAliasAltname($mod)
+   }
    if {[info exists ::g_loadedModuleAutoAltname($mod)]} {
       unset ::g_loadedModuleAutoAltname($mod)
    }
 }
 
-proc getLoadedAltname {mod {serialized 0}} {
+proc getLoadedAltname {mod {serialized 0} {typelist {sym alias autosym}}} {
    set ret {}
 
-   if {[info exists ::g_loadedModuleAltname($mod)]} {
+   if {[info exists ::g_loadedModuleAltname($mod)] && [isInList $typelist\
+      sym]} {
       set ret $::g_loadedModuleAltname($mod)
    }
-   if {[info exists ::g_loadedModuleAutoAltname($mod)]} {
+   if {[info exists ::g_loadedModuleAliasAltname($mod)] && [isInList\
+      $typelist alias]} {
+      if {$serialized} {
+         # add a 'al|' prefix to each alias to distinguish them when
+         # serialized
+         foreach altname $::g_loadedModuleAliasAltname($mod) {
+            lappend ret al|$altname
+         }
+      } else {
+         set ret [concat $ret $::g_loadedModuleAliasAltname($mod)]
+      }
+   }
+   if {[info exists ::g_loadedModuleAutoAltname($mod)] && [isInList $typelist\
+      autosym]} {
       if {$serialized} {
          # add a 'as|' prefix to each auto sym to distinguish them when
          # serialized
@@ -6350,9 +6300,10 @@ proc pushSettings {} {
       g_stateFunctions g_Functions g_newXResources g_delXResources\
       g_loadedModules g_loadedModuleFiles g_loadedModuleUasked\
       g_loadedModuleConflict g_loadedModulePrereq g_loadedModuleAltname\
-      g_loadedModuleAutoAltname g_moduleDepend g_dependHash g_moduleNPODepend\
-      g_dependNPOHash g_prereqViolation g_prereqNPOViolation\
-      g_conflictViolation g_moduleUnmetDep g_unmetDepHash g_moduleEval} {
+      g_loadedModuleAutoAltname g_loadedModuleAliasAltname g_moduleDepend\
+      g_dependHash g_moduleNPODepend g_dependNPOHash g_prereqViolation\
+      g_prereqNPOViolation g_conflictViolation g_moduleUnmetDep\
+      g_unmetDepHash g_moduleEval} {
       eval "lappend ::g_SAVE_$var \[array get ::$var\]"
    }
    # save non-array variable and indication if it was set
@@ -6373,9 +6324,10 @@ proc popSettings {} {
       g_changeDir g_stdoutPuts g_return_text\
       g_loadedModules g_loadedModuleFiles g_loadedModuleUasked\
       g_loadedModuleConflict g_loadedModulePrereq g_loadedModuleAltname\
-      g_loadedModuleAutoAltname g_moduleDepend g_dependHash g_moduleNPODepend\
-      g_dependNPOHash g_prereqViolation g_prereqNPOViolation\
-      g_conflictViolation g_moduleUnmetDep g_unmetDepHash g_moduleEval} {
+      g_loadedModuleAutoAltname g_loadedModuleAliasAltname g_moduleDepend\
+      g_dependHash g_moduleNPODepend g_dependNPOHash g_prereqViolation\
+      g_prereqNPOViolation g_conflictViolation g_moduleUnmetDep\
+      g_unmetDepHash g_moduleEval} {
       eval "set ::g_SAVE_$var \[lrange \$::g_SAVE_$var 0 end-1\]"
    }
    reportDebug "previously saved settings flushed (#$flushedid)"
@@ -6386,9 +6338,10 @@ proc restoreSettings {} {
       g_stateFunctions g_Functions g_newXResources g_delXResources\
       g_loadedModules g_loadedModuleFiles g_loadedModuleUasked\
       g_loadedModuleConflict g_loadedModulePrereq g_loadedModuleAltname\
-      g_loadedModuleAutoAltname g_moduleDepend g_dependHash g_moduleNPODepend\
-      g_dependNPOHash g_prereqViolation g_prereqNPOViolation\
-      g_conflictViolation g_moduleUnmetDep g_unmetDepHash g_moduleEval} {
+      g_loadedModuleAutoAltname g_loadedModuleAliasAltname g_moduleDepend\
+      g_dependHash g_moduleNPODepend g_dependNPOHash g_prereqViolation\
+      g_prereqNPOViolation g_conflictViolation g_moduleUnmetDep\
+      g_unmetDepHash g_moduleEval} {
       # clear current $var arrays
       if {[info exists ::$var]} {
          eval "unset ::$var; array set ::$var {}"
@@ -7407,8 +7360,8 @@ proc runCommand {cmd args} {
 
 proc getAbsolutePath {path} {
    # currently executing a modulefile or rc, so get the directory of this file
-   if {$::ModulesCurrentModulefile ne {}} {
-      set curdir [file dirname $::ModulesCurrentModulefile]
+   if {[currentState modulefile] ne {}} {
+      set curdir [file dirname [currentState modulefile]]
    # elsewhere get module command current working directory
    } else {
       # register pwd at first call
@@ -7636,21 +7589,6 @@ proc pjoin {lst sep} {
    return $res
 }
 
-# Dictionary-style string comparison
-# Use dictionary sort of lsort proc to compare two strings in the "string
-# compare" fashion (returning -1, 0 or 1). Tcl dictionary-style comparison
-# enables to compare software versions (ex: "1.10" is greater than "1.8")
-proc compareVersion {str1 str2} {
-   if {$str1 eq $str2} {
-      return 0
-   # put both strings in a list, then lsort it and get first element
-   } elseif {[lindex [lsort -dictionary [list $str1 $str2]] 0] eq $str1} {
-      return -1
-   } else {
-      return 1
-   }
-}
-
 # Is provided string a version number: consider first element of string if
 # '.' character used in it. [0-9af] on this first part is considered valid
 # anything else could be used in latter elements
@@ -7820,12 +7758,12 @@ proc readModuleContent {modfile {report_read_issue 0} {must_have_cookie 1}\
          # only read beginning of file if just checking validity and not
          # asked to always fully read files
          set fdata [readFile $modfile [expr {$only_check_validity &&\
-            ![currentAlwaysReadFullFile]}]]
+            ![currentState always_read_full_file]}]]
          # extract magic cookie (first word of modulefile)
          set fh [string trimright [lindex [split [string range $fdata 0 32]]\
             0] #]
          # cache full file read to minimize file operations
-         if {!$only_check_validity || [currentAlwaysReadFullFile]} {
+         if {!$only_check_validity || [currentState always_read_full_file]} {
             set ::g_modfileContent($modfile) [list $fh $fdata]
          }
       }
@@ -7849,7 +7787,7 @@ proc readModuleContent {modfile {report_read_issue 0} {must_have_cookie 1}\
          }
       # check if min version requirement is met if magic cookie is mandatory
       } elseif {$must_have_cookie && [string length $fh] > 8 &&\
-         [compareVersion {@MODULES_RELEASE@} [string range $fh 8 end]] <0} {
+         [versioncmp {@MODULES_RELEASE@} [string range $fh 8 end]] <0} {
          set msg "Modulefile requires at least Modules version [string range\
             $fh 8 end]"
          if {$only_check_validity} {
@@ -8007,20 +7945,20 @@ proc modVersCmpProc {cmpspec versspec modvers test {psuf {}}} {
          # as we work here on a version range: psuf suffix is ignored, checks
          # are always extended_default-enabled (as 1.2 includes 1.2.12 for
          # instance) and equal, eqstart and match tests are equivalent
-         set ret [expr {[isVersion $modvers] && ([compareVersion $modvers\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $modvers\
             $versspec] != -1 || [string match $versspec.* $modvers])}]
       }
       le {
          # 'ge' comment also applies here
-         set ret [expr {[isVersion $modvers] && ([compareVersion $versspec\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $versspec\
             $modvers] != -1 || [string match $versspec.* $modvers])}]
       }
       be {
          # 'ge' comment also applies here
          lassign $versspec lovers hivers
-         set ret [expr {[isVersion $modvers] && ([compareVersion $modvers\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $modvers\
             $lovers] != -1 || [string match $lovers.* $modvers]) &&\
-            ([compareVersion $hivers $modvers] != -1 || [string match\
+            ([versioncmp $hivers $modvers] != -1 || [string match\
             $hivers.* $modvers])}]
       }
    }
@@ -8044,18 +7982,18 @@ proc modVersCmpProcIcase {cmpspec versspec modvers test {psuf {}}} {
          }
       }
       ge {
-         set ret [expr {[isVersion $modvers] && ([compareVersion $modvers\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $modvers\
             $versspec] != -1 || [string match -nocase $versspec.* $modvers])}]
       }
       le {
-         set ret [expr {[isVersion $modvers] && ([compareVersion $versspec\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $versspec\
             $modvers] != -1 || [string match -nocase $versspec.* $modvers])}]
       }
       be {
          lassign $versspec lovers hivers
-         set ret [expr {[isVersion $modvers] && ([compareVersion $modvers\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $modvers\
             $lovers] != -1 || [string match $lovers.* $modvers]) &&\
-            ([compareVersion $hivers $modvers] != -1 || [string match -nocase\
+            ([versioncmp $hivers $modvers] != -1 || [string match -nocase\
             $hivers.* $modvers])}]
       }
    }
@@ -8080,18 +8018,18 @@ proc modVersCmpProcExtdfl {cmpspec versspec modvers test {psuf {}}} {
          }
       }
       ge {
-         set ret [expr {[isVersion $modvers] && ([compareVersion $modvers\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $modvers\
             $versspec] != -1 || [string match $versspec.* $modvers])}]
       }
       le {
-         set ret [expr {[isVersion $modvers] && ([compareVersion $versspec\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $versspec\
             $modvers] != -1 || [string match $versspec.* $modvers])}]
       }
       be {
          lassign $versspec lovers hivers
-         set ret [expr {[isVersion $modvers] && ([compareVersion $modvers\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $modvers\
             $lovers] != -1 || [string match $lovers.* $modvers]) &&\
-            ([compareVersion $hivers $modvers] != -1 || [string match\
+            ([versioncmp $hivers $modvers] != -1 || [string match\
             $hivers.* $modvers])}]
       }
    }
@@ -8118,18 +8056,18 @@ proc modVersCmpProcIcaseExtdfl {cmpspec versspec modvers test {psuf {}}} {
          }
       }
       ge {
-         set ret [expr {[isVersion $modvers] && ([compareVersion $modvers\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $modvers\
             $versspec] != -1 || [string match -nocase $versspec.* $modvers])}]
       }
       le {
-         set ret [expr {[isVersion $modvers] && ([compareVersion $versspec\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $versspec\
             $modvers] != -1 || [string match -nocase $versspec.* $modvers])}]
       }
       be {
          lassign $versspec lovers hivers
-         set ret [expr {[isVersion $modvers] && ([compareVersion $modvers\
+         set ret [expr {[isVersion $modvers] && ([versioncmp $modvers\
             $lovers] != -1 || [string match $lovers.* $modvers]) &&\
-            ([compareVersion $hivers $modvers] != -1 || [string match -nocase\
+            ([versioncmp $hivers $modvers] != -1 || [string match -nocase\
             $hivers.* $modvers])}]
       }
    }
@@ -8759,12 +8697,11 @@ proc getModules {dir {mod {}} {fetch_mtime 0} {search {}} {filter {}}} {
    }
 
    # add all versions found when parsing .version or .modulerc files in this
-   # directory (skip versions not registered from this directory except if
-   # global or user rc definitions should be included))
+   # directory or in global or user rc definitions
    foreach vers [array names g_moduleVersion] {
       set versmod $g_moduleVersion($vers)
       if {($dir ne {} && [string first $dir/ $g_sourceVersion($vers)] == 0)\
-         || ($add_rc_defs && [info exists g_rcVersion($vers)])} {
+         || [info exists g_rcVersion($vers)]} {
          set found_list($vers) [list version $versmod]
 
          # build module symbol list
@@ -9863,7 +9800,7 @@ proc parseModuleCommandName {command defaultcmd} {
 }
 
 # analyze arg list passed to a module cmd to set options
-proc parseModuleCommandArgs {cmd args} {
+proc parseModuleCommandArgs {topcall cmd args} {
    set show_oneperline 0
    set show_mtime 0
    set show_filter {}
@@ -9871,6 +9808,7 @@ proc parseModuleCommandArgs {cmd args} {
    set search_match [getConf search_match]
    set dump_state 0
    set addpath_pos prepend
+   set not_req 0
    set otherargs {}
 
    # parse argument list
@@ -9957,6 +9895,13 @@ proc parseModuleCommandArgs {cmd args} {
          --auto - --no-auto - -f - --force {
             reportWarning "Unsupported option '$arg'"
          }
+         --not-req {
+            if {!$topcall && [isInList [list load unload switch] $cmd]} {
+               set not_req 1
+            } else {
+               reportWarning "Unsupported option '$arg'"
+            }
+         }
          default {
             lappend otherargs $arg
          }
@@ -9966,9 +9911,9 @@ proc parseModuleCommandArgs {cmd args} {
    reportDebug "(show_oneperline=$show_oneperline, show_mtime=$show_mtime,\
       show_filter=$show_filter, search_filter=$search_filter,\
       search_match=$search_match, dump_state=$dump_state,\
-      addpath_pos=$addpath_pos, otherargs=$otherargs)"
+      addpath_pos=$addpath_pos, not_req=$not_req, otherargs=$otherargs)"
    return [list $show_oneperline $show_mtime $show_filter $search_filter\
-      $search_match $dump_state $addpath_pos $otherargs]
+      $search_match $dump_state $addpath_pos $not_req $otherargs]
 }
 
 # when advanced_version_spec option is enabled, parse argument list to set in
@@ -10060,7 +10005,7 @@ proc parseModuleVersionSpecifier {mlspec args} {
                   set cmpspec le
                   set versspec $hivers
                # between or equal
-               } elseif {[compareVersion $lovers $hivers] == 1} {
+               } elseif {[versioncmp $lovers $hivers] == 1} {
                   set invalidversrange 1
                } else {
                   set cmpspec be
@@ -10138,6 +10083,15 @@ proc parseModuleVersionSpecifier {mlspec args} {
 }
 
 proc setModuleVersSpec {modarg modname cmpspec versspec} {
+   # translate @loaded version into currently loaded mod matching modname
+   if {$cmpspec eq {eq} && $versspec eq {loaded}} {
+      if {[set lmmod [getLoadedMatchingName $modname]] ne {}} {
+         set modname [file dirname $lmmod]
+         set versspec [file tail $lmmod]
+      } else {
+         knerror "No loaded version found for '$modname' module"
+      }
+   }
    # save module root name
    set modroot [lindex [file split $modname] 0]
    # save module single designation if any and module name
@@ -10306,38 +10260,24 @@ proc cmdModuleList {show_oneperline show_mtime} {
             lappend display_list $mod
          } else {
             set modfile [getModulefileFromLoadedModule $mod]
-            # skip rc find and execution if mod is registered as full path
-            if {[isModuleFullPath $mod]} {
-               set mtime [getFileMtime $mod]
-               set tag_list {}
-            # or if loaded module is a virtual module
-            } elseif {[isModuleVirtual $mod $modfile]} {
-               set mtime [getFileMtime $modfile]
-               set tag_list {}
-            } else {
-               # call getModules to find and execute rc files for this mod
-               set dir [getModulepathFromModuleName $modfile $mod]
-               array set mod_list [getModules $dir $mod $show_mtime]
-               # fetch info only if mod found
-               if {[info exists mod_list($mod)]} {
-                  set mtime [lindex $mod_list($mod) 1]
-                  set tag_list [getVersAliasList $mod]
-               } else {
-                  set tag_list {}
+
+            # fetch symbols from loaded environment information
+            set modname [file dirname $mod]
+            set tag_list {}
+            foreach altname [getLoadedAltname $mod 0 sym] {
+               # skip non-symbol entry
+               if {$altname ne $modname} {
+                  lappend tag_list [file tail $altname]
                }
             }
+            set tag_list [lsort -dictionary $tag_list]
 
             if {$json} {
                set dispsgr [formatListEltToJsonDisplay $mod type s modulefile\
                   symbols a $tag_list pathname s $modfile]
             } elseif {$show_mtime} {
-               if {[info exists mtime]} {
-                  set clock_mtime [clock format $mtime -format\
-                     {%Y/%m/%d %H:%M:%S}]
-                  unset mtime
-               } else {
-                  set clock_mtime {}
-               }
+               set clock_mtime [expr {[file exists $modfile] ? [clock format\
+                  [getFileMtime $modfile] -format {%Y/%m/%d %H:%M:%S}] : {}}]
 
                # add to display file modification time in addition to tags
                lassign [formatListEltToLongDisplay $mod {} {} $tag_list sy\
@@ -10376,7 +10316,7 @@ proc cmdModuleList {show_oneperline show_mtime} {
 proc cmdModuleDisplay {args} {
    reportDebug "displaying $args"
 
-   pushMode display
+   lappendState mode display
    set first_report 1
    foreach mod $args {
       lassign [getPathToModule $mod] modfile modname
@@ -10391,7 +10331,7 @@ proc cmdModuleDisplay {args} {
          displaySeparatorLine
       }
    }
-   popMode
+   lpopState mode
 }
 
 proc cmdModulePaths {mod} {
@@ -10482,7 +10422,7 @@ proc cmdModuleSearch {{mod {}} {search {}}} {
       lappend searchmod wild
    }
    set foundmod 0
-   pushMode whatis
+   lappendState mode whatis
    set dir_list [getModulePathList exiterronundef]
    foreach dir $dir_list {
       array unset mod_list
@@ -10654,7 +10594,7 @@ proc cmdModuleSearch {{mod {}} {search {}}} {
          displayElementList $dir mp sepline 1 0 $display_list
       }
    }
-   popMode
+   lpopState mode
 
    setState inhibit_errreport 0
 
@@ -10691,10 +10631,17 @@ proc cmdModuleSwitch {uasked old {new {}}} {
 
    reportDebug "old='$old' new='$new' (uasked=$uasked)"
 
+   # extend requirement recording inhibition to switch subcontext
+   set inhibit_req_rec [expr {[currentState inhibit_req_record] ==\
+      [currentState evalid]}]
+
    # record sumup messages from underlying unload/load actions under the same
    # switch message record id to report (evaluation messages still go under
    # their respective unload/load block
-   pushMsgRecordId switch-$old-$new-[getEvalModuleStackDepth]
+   pushMsgRecordId switch-$old-$new-[depthState modulename]
+   if {$inhibit_req_rec} {
+      lappendState inhibit_req_record [currentState evalid]
+   }
 
    set ret [cmdModuleUnload swunload $unload_match 1 0 0 0 $old]
 
@@ -10736,6 +10683,9 @@ proc cmdModuleSwitch {uasked old {new {}}} {
    # report all recorded sumup messages for this evaluation
    reportMsgRecord "Switching from [sgr hi $old] to [sgr hi $new]"
    popMsgRecordId
+   if {$inhibit_req_rec} {
+      lpopState inhibit_req_record
+   }
 
    # register modulefile to load as prereq when called from modulefile
    if {!$uasked && !$ret && $argnew ne {}} {
@@ -10838,7 +10788,7 @@ proc cmdModuleRestore {{coll default}} {
       path_to_unuse path_to_use
 
    # create an eval id to track successful/failed module evaluations
-   pushMsgRecordId restore-$coll-[getEvalModuleStackDepth] 0
+   pushMsgRecordId restore-$coll-[depthState modulename] 0
 
    # unload modules one by one (no dependency auto unload)
    if {[llength $mod_to_unload] > 0} {
@@ -11026,13 +10976,13 @@ proc cmdModuleSource {args} {
       if {$fpath eq {}} {
          reportErrorAndExit {File name empty}
       } elseif {[file exists $absfpath]} {
-         pushMode load
+         lappendState mode load
          # relax constraint of having a magic cookie at the start of the
          # modulefile to execute as sourced files may need more flexibility
          # as they may be managed outside of the modulefile environment like
          # the initialization modulerc file
          execute-modulefile $absfpath $absfpath $absfpath 0
-         popMode
+         lpopState mode
       } else {
          reportErrorAndExit "File $fpath does not exist"
       }
@@ -11046,13 +10996,13 @@ proc cmdModuleUnsource {args} {
       if {$fpath eq {}} {
          reportErrorAndExit {File name empty}
       } elseif {[file exists $absfpath]} {
-         pushMode unload
+         lappendState mode unload
          # relax constraint of having a magic cookie at the start of the
          # modulefile to execute as sourced files may need more flexibility
          # as they may be managed outside of the modulefile environment like
          # the initialization modulerc file
          execute-modulefile $absfpath $absfpath $absfpath 0
-         popMode
+         lpopState mode
       } else {
          reportErrorAndExit "File $fpath does not exist"
       }
@@ -11063,7 +11013,7 @@ proc cmdModuleLoad {context uasked args} {
    reportDebug "loading $args (context=$context, uasked=$uasked)"
 
    set ret 0
-   pushMode load
+   lappendState mode load
    foreach mod $args {
       # if a switch action is ongoing...
       if {$context eq {swload}} {
@@ -11103,7 +11053,7 @@ proc cmdModuleLoad {context uasked args} {
       }
 
       # set a unique id to record messages related to this evaluation.
-      set msgrecid load-$modname-[getEvalModuleStackDepth]
+      set msgrecid load-$modname-[depthState modulename]
       pushMsgRecordId $msgrecid
 
       # record evaluation attempt on actual module name
@@ -11169,8 +11119,8 @@ proc cmdModuleLoad {context uasked args} {
          set retisconun [eval isModuleEvaluated conun "{$modname}"\
             $modconlist]
          if {![set retiseval [eval isModuleEvaluated any "{$modname}"\
-            $modconlist]] || [currentMsgRecordId] ne [topMsgRecordId] ||\
-            !$retisconun} {
+            $modconlist]] || [currentState msgrecordid] ne [topState\
+            msgrecordid] || !$retisconun} {
             # more appropriate msg if an evaluation was attempted or is
             # by-passed. error is reported using declared conflict name (as if
             # it was raised raised from a conflict modulefile command)
@@ -11287,7 +11237,7 @@ proc cmdModuleLoad {context uasked args} {
       }
       popMsgRecordId
    }
-   popMode
+   lpopState mode
 
    return $ret
 }
@@ -11297,7 +11247,7 @@ proc cmdModuleUnload {context match auto force onlyureq onlyndep args} {
       force=$force, onlyureq=$onlyureq, onlyndep=$onlyndep)"
 
    set ret 0
-   pushMode unload
+   lappendState mode unload
    foreach mod $args {
       # if a switch action is ongoing...
       if {$context eq {swunload}} {
@@ -11348,7 +11298,7 @@ proc cmdModuleUnload {context match auto force onlyureq onlyndep args} {
          uplevel 1 set old $modname
       }
       # set a unique id to record messages related to this evaluation.
-      set msgrecid unload-$modname-[getEvalModuleStackDepth]
+      set msgrecid unload-$modname-[depthState modulename]
       pushMsgRecordId $msgrecid
 
       # record evaluation attempt on actual module name
@@ -11557,7 +11507,7 @@ proc cmdModuleUnload {context match auto force onlyureq onlyndep args} {
       reportMsgRecord "Unloading [sgr hi $modname]"
       popMsgRecordId
    }
-   popMode
+   lpopState mode
 
    return $ret
 }
@@ -11566,11 +11516,11 @@ proc cmdModulePurge {} {
    reportDebug called.
 
    # create an eval id to track successful/failed module evaluations
-   pushMsgRecordId purge-[getEvalModuleStackDepth] 0
+   pushMsgRecordId purge-[depthState modulename] 0
 
    # unload one by one to ensure same behavior whatever auto_handling state
    # force it to handle loaded modules in violation state
-   eval cmdModuleUnload unload match 0 1 0 0 [lreverse [getLoadedModuleList]]
+   eval cmdModuleUnload unload match 0 1 0 1 [lreverse [getLoadedModuleList]]
 
    popMsgRecordId 0
 }
@@ -11585,7 +11535,7 @@ proc cmdModuleReload {args} {
    reportDebug "reloading $lmlist"
 
    # create an eval id to track successful/failed module evaluations
-   pushMsgRecordId reload-[getEvalModuleStackDepth] 0
+   pushMsgRecordId reload-[depthState modulename] 0
 
    # no reload of all loaded modules attempt if constraints are violated
    if {[llength $args] == 0 && ![areModuleConstraintsSatisfied]} {
@@ -11710,9 +11660,9 @@ proc cmdModuleUse {pos args} {
                set path [getAbsolutePath $path]
             }
             if {[file isdirectory [resolvStringWithEnv $path]]} {
-               pushMode load
+               lappendState mode load
                catch {add-path $pos MODULEPATH $path}
-               popMode
+               lpopState mode
             } else {
                reportError "Directory '$path' not found"
             }
@@ -11754,11 +11704,11 @@ proc cmdModuleUnuse {args} {
          }
 
          if {$unusepath ne {}} {
-            pushMode unload
+            lappendState mode unload
             catch {
                unload-path MODULEPATH $unusepath
             }
-            popMode
+            lpopState mode
 
             # refresh path list after unload
             set modpathlist [getModulePathList returnempty 0 0]
@@ -11777,7 +11727,7 @@ proc cmdModuleAutoinit {} {
    setState autoinit 1
 
    # initialize env variables around module command
-   pushMode load
+   lappendState mode load
 
    # register command location
    setenv MODULES_CMD [getAbsolutePath $::argv0]
@@ -11799,8 +11749,19 @@ proc cmdModuleAutoinit {} {
          foreach fline $fdata {
             if {[regexp {^\s*(.*?)\s*(#.*|)$} $fline match patharg] == 1\
                && $patharg ne {}} {
-               eval cmdModuleUse append [split $patharg :]
+               foreach path [split $patharg :] {
+                  # resolve path directory in case wildcard character used
+                  set globlist [glob -types d -nocomplain $path]
+                  if {[llength $globlist] == 0} {
+                     lappend pathlist $path
+                  } else {
+                     eval lappend pathlist $globlist
+                  }
+               }
             }
+         }
+         if {[info exists pathlist]} {
+            eval cmdModuleUse append $pathlist
          }
       }
 
@@ -11825,6 +11786,14 @@ proc cmdModuleAutoinit {} {
    # default MODULESHOME
    setenv MODULESHOME [getConf home]
 
+   # append dir where to find module function for ksh (to get it defined in
+   # interactive and non-interactive sub-shells). also applies for shells
+   # listed in shells_with_ksh_fpath conf
+   if {[isInList [concat [getConf shells_with_ksh_fpath] [list ksh]]\
+      [getState shell]]} {
+      append-path FPATH @initdir@/ksh-functions
+   }
+
    # define Modules init script as shell startup file
    if {[getConf set_shell_startup] && [isInList [list sh csh fish]\
       [getState shelltype]]} {
@@ -11835,7 +11804,7 @@ proc cmdModuleAutoinit {} {
       setenv BASH_ENV @initdir@/bash
    }
 
-   popMode
+   lpopState mode
 }
 
 proc cmdModuleInit {args} {
@@ -11964,8 +11933,8 @@ proc cmdModuleInit {args} {
 proc cmdModuleResurface {cmd args} {
    reportDebug "cmd='$cmd', args='$args'"
 
-   pushMode load
-   pushCommandName $cmd
+   lappendState mode load
+   lappendState commandname $cmd
 
    # run modulefile command and get its result
    if {[catch {eval $cmd $args} res]} {
@@ -11986,14 +11955,14 @@ proc cmdModuleResurface {cmd args} {
       }
    }
 
-   popCommandName
-   popMode
+   lpopState commandname
+   lpopState mode
 }
 
 proc cmdModuleTest {args} {
    reportDebug "testing $args"
 
-   pushMode test
+   lappendState mode test
    set first_report 1
    foreach mod $args {
       lassign [getPathToModule $mod] modfile modname
@@ -12008,7 +11977,7 @@ proc cmdModuleTest {args} {
          displaySeparatorLine
       }
    }
-   popMode
+   lpopState mode
 }
 
 proc cmdModuleClear {{doit {}}} {
@@ -12028,18 +11997,18 @@ proc cmdModuleClear {{doit {}}} {
    # should be confirmed or forced to proceed
    if {[string equal -nocase -length 1 $doit y] || [getState force]} {
       set vartoclear [list LOADEDMODULES MODULES_LMALTNAME MODULES_LMCONFLICT\
-         MODULES_LMNOTUASKED MODULES_LMPREREQ _LMFILES_]
+         MODULES_LMNOTUASKED MODULES_LMPREREQ MODULES_LMSOURCESH _LMFILES_]
 
       # add any reference counter variable to the list to unset
       set vartoclear [concat $vartoclear [array names ::env -glob *_modshare]\
          [array names ::env -glob MODULES_MODSHARE_*]]
 
       # unset all Modules runtime variables
-      pushMode load
+      lappendState mode load
       foreach var $vartoclear {
          unset-env $var
       }
-      popMode
+      lpopState mode
    } else {
       reportInfo "Modules runtime information were not cleared"
    }
@@ -12099,18 +12068,18 @@ proc cmdModuleConfig {dump_state args} {
          reportErrorAndExit "Configuration option '$name' is locked"
       } elseif {$nameunset} {
          # unset configuration variable
-         pushMode load
+         lappendState mode load
          unsetenv $confvar($name)
-         popMode
+         lpopState mode
       } elseif {[llength $confvalid($name)] > 0 && [notInList\
          $confvalid($name) $value]} {
          reportErrorAndExit "Valid values for configuration option '$name'\
             are: $confvalid($name)"
       } else {
          # effectively set configuration variable
-         pushMode load
+         lappendState mode load
          setenv $confvar($name) $value
-         popMode
+         lpopState mode
       }
       # clear cached value for config if any
       unsetConf $name
@@ -12200,7 +12169,7 @@ See 'module --help' to get available commands and options.}
 }
 
 proc cmdModuleHelp {args} {
-   pushMode help
+   lappendState mode help
    set first_report 1
    foreach arg $args {
       lassign [getPathToModule $arg] modfile modname
@@ -12216,7 +12185,7 @@ proc cmdModuleHelp {args} {
          displaySeparatorLine
       }
    }
-   popMode
+   lpopState mode
    if {[llength $args] == 0} {
       reportVersion
       report {Usage: module [options] [command] [args ...]
@@ -12524,7 +12493,7 @@ if {[catch {
    }
 
    # no modulefile is currently being interpreted
-   pushModuleFile {}
+   lappendState modulefile {}
 
    # eval needed to pass otherargv as list to module proc
    eval $execcmdlist

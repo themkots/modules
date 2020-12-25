@@ -497,6 +497,9 @@ Module Sub-Commands
  * ``ignored_dirs``: directories ignored when looking for modulefiles
  * ``implicit_default``: set an implicit default version for modules (defines
    :envvar:`MODULES_IMPLICIT_DEFAULT`)
+ * ``implicit_requirement``: implicitly define a requirement onto modules
+   specified on :mfcmd:`module` commands in modulefile (defines
+   :envvar:`MODULES_IMPLICIT_REQUIREMENT`)
  * ``locked_configs``: configuration options that cannot be superseded
  * ``ml``: define :command:`ml` command at initialization time (defines
    :envvar:`MODULES_ML`)
@@ -515,6 +518,9 @@ Module Sub-Commands
    :envvar:`MODULES_SEARCH_MATCH`)
  * ``set_shell_startup``: ensure module command definition by setting shell
    startup file (defines :envvar:`MODULES_SET_SHELL_STARTUP`)
+ * ``shells_with_ksh_fpath``: ensure module command is defined in ksh when it
+   is started as a sub-shell from the listed shells (defines
+   :envvar:`MODULES_SHELLS_WITH_KSH_FPATH`)
  * ``siteconfig``: primary site-specific configuration script location
  * ``tcl_ext_lib``: Modules Tcl extension library location
  * ``term_background``: terminal background color kind (defines
@@ -1023,6 +1029,11 @@ exists for these ``default`` or ``latest`` version names. Using the
 ``mod@latest`` (or ``mod/latest``) syntax ensures highest available version
 will be selected.
 
+The symbolic version ``loaded`` may be used over loaded module name to
+designate the loaded version of the module. This version symbol should be
+specified using the ``@`` prefix notation (e.g. ``foo@loaded``). An error is
+returned if no version of designated module is currently loaded.
+
 
 Collections
 ^^^^^^^^^^^
@@ -1381,6 +1392,25 @@ ENVIRONMENT
 
     .. versionadded:: 4.3
 
+.. envvar:: MODULES_IMPLICIT_REQUIREMENT
+
+ Defines (if set to ``1``) or not (if set to ``0``) an implicit prereq or
+ conflict requirement onto modules specified respectively on
+ :mfcmd:`module load<module>` or :mfcmd:`module unload<module>` commands in
+ modulefile. When enabled an implicit conflict requirement onto switched-off
+ module and a prereq requirement onto switched-on module are also defined for
+ :mfcmd:`module switch <module>` commands used in modulefile.
+
+ This environment variable supersedes the value of the configuration option
+ ``implicit_requirement`` set in :file:`modulecmd.tcl` script.
+ :envvar:`MODULES_IMPLICIT_REQUIREMENT` is in turn superseded by the
+ ``--not-req`` option that applies to a :mfcmd:`module` command in a
+ modulefile.
+
+ .. only:: html
+
+    .. versionadded:: 4.7
+
 .. envvar:: MODULES_LMALTNAME
 
  A colon separated list of the alternative names set through
@@ -1390,12 +1420,21 @@ ENVIRONMENT
  loaded modulefile and its alternative names are separated by the ampersand
  character.
 
+ Each alternative name stored in :envvar:`MODULES_LMALTNAME` is prefixed by
+ the ``al|`` string if it corresponds to a module alias or prefixed by the
+ ``as|`` string if it corresponds to an automatic version symbol. These
+ prefixes help to distinguish the different kind of alternative name.
+
  This environment variable is intended for :command:`module` command internal
  use to get knowledge of the alternative names matching loaded *modulefiles*
  in order to keep environment consistent when conflicts or pre-requirements
  are set over these alternative designations. It also helps to find a match
  after *modulefiles* being loaded when :subcmd:`unload`, :subcmd:`is-loaded`
  or :subcmd:`info-loaded` actions are run over these names.
+
+ Starting version 4.7 of Modules, :envvar:`MODULES_LMALTNAME` is also used on
+ :subcmd:`list` sub-command to report the symbolic versions associated with
+ the loaded modules.
 
  .. only:: html
 
@@ -1582,6 +1621,18 @@ ENVIRONMENT
  .. only:: html
 
     .. versionadded:: 4.3
+
+.. envvar:: MODULES_SHELLS_WITH_KSH_FPATH
+
+ A list of shell on which the :envvar:`FPATH` environment variable should be
+ defined at initialization time to point to the :file:`ksh-functions`
+ directory where the ksh initialization script for module command is located.
+ It enables for the listed shells to get module function defined when starting
+ ksh as sub-shell from there.
+
+ .. only:: html
+
+    .. versionadded:: 4.7
 
 .. envvar:: MODULES_SILENT_SHELL_DEBUG
 

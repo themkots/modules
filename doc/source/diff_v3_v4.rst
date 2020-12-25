@@ -165,6 +165,8 @@ On compatibility version, paths composing the :envvar:`MODULEPATH` environment v
 Modules Specific Tcl Commands
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+On version 4 the characters that have a special meaning when rendered in shells are escaped when used in value to set environment variables, shell alias or shell functions. Thus it is possible to set environment elements with value containing these special characters (like backticks). On version 3 these special characters were evaluated by shell when recording the environment changes implied by modulefile evaluation.
+
 :mfcmd:`append-path`
 
 :mfcmd:`prepend-path`
@@ -481,15 +483,21 @@ Environment
 
  These environment variables appeared on version ``4.4`` and are not supported on compatibility version.
 
-:envvar:`MODULES_ML``
+:envvar:`MODULES_ML`
 
  This environment variable appeared on version ``4.5`` and is not supported on compatibility version.
 
-:envvar:`MODULES_LMSOURCESH``
+:envvar:`MODULES_LMSOURCESH`
 
-:envvar:`MODULES_NEARLY_FORBIDDEN_DAYS``
+:envvar:`MODULES_NEARLY_FORBIDDEN_DAYS`
 
  These environment variables appeared on version ``4.6`` and are not supported on compatibility version.
+
+:envvar:`MODULES_SHELLS_WITH_KSH_FPATH`
+
+:envvar:`MODULES_IMPLICIT_REQUIREMENT`
+
+ These environment variables appeared on version ``4.7`` and are not supported on compatibility version.
 
 
 Modules Specific Tcl Commands
@@ -504,6 +512,8 @@ Modules Specific Tcl Commands
 :mfcmd:`module`
  
  In case of ``module load`` command specifying multiple *modulefiles*, when mode is set to ``unload`` these *modulefiles* will be unloaded in the reverse order to ensure correct handling of prerequisites.
+
+ Starting with version ``4.7``, the ``load``, ``unload`` and ``switch`` sub-commands support the ``--not-req`` option to avoid recording a prereq or a conflict requirement toward specified modules.
 
 :mfcmd:`module-info`
  
@@ -564,3 +574,17 @@ Modules Specific Tcl Commands
 :mfcmd:`module-forbid`
 
  These Modules-specific Tcl commands appeared on version ``4.6`` and are not supported on compatibility version.
+
+:mfcmd:`versioncmp`
+
+ This Modules-specific Tcl command appeared on version ``4.7`` and is not supported on compatibility version.
+
+
+Modules Variables
+^^^^^^^^^^^^^^^^^
+
+:mfvar:`ModuleTool`
+
+:mfvar:`ModuleToolVersion`
+
+ These Modules-specific Tcl variables appeared on version ``4.7`` and are not supported on compatibility version.

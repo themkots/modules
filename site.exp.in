@@ -12,6 +12,7 @@ set install_moduleshome "@moduleshome@"
 set install_versioning "@versioning@"
 
 set install_version "@VERSION@"
+set install_release "@RELEASE@"
 
 set install_modulepath {@modulepath@}
 set install_loadedmodules "@loadedmodules@"
@@ -53,6 +54,8 @@ set install_lightbgcolors "@lightbgcolors@"
 set install_termbg "@termbg@"
 
 set install_autohandling "@autohandling@"
+
+set install_implicitrequirement "@implicitrequirement@"
 
 set install_availindepth "@availindepth@"
 

@@ -31,9 +31,9 @@ set ans [list]
 lappend ans [list setpath LOADEDMODULES bar/1]
 lappend ans [list setpath _LMFILES_ $mp/bar/1]
 if {[is_conf_enabled advversspec implicitdefault]} {
-    lappend ans [list setpath MODULES_LMALTNAME bar/1&bar/top&bar/dfl&bar/3&as|bar/default&as|bar/latest]
+    lappend ans [list setpath MODULES_LMALTNAME bar/1&bar/top&bar/dfl&al|bar/3&as|bar/default&as|bar/latest]
 } else {
-    lappend ans [list setpath MODULES_LMALTNAME bar/1&bar/top&bar/dfl&bar/3]
+    lappend ans [list setpath MODULES_LMALTNAME bar/1&bar/top&bar/dfl&al|bar/3]
 }
 testouterr_cmd sh {load bar/top} $ans {}
 testouterr_cmd sh {load bar/3} $ans {}
@@ -41,9 +41,9 @@ set ans [list]
 lappend ans [list setpath LOADEDMODULES foo/2]
 lappend ans [list setpath _LMFILES_ $mp/foo/.common]
 if {[is_conf_enabled advversspec implicitdefault]} {
-    lappend ans [list setpath MODULES_LMALTNAME foo/2&foo/lat&as|foo/default&as|foo/latest]
+    lappend ans [list setpath MODULES_LMALTNAME foo/2&al|foo/lat&as|foo/default&as|foo/latest]
 } else {
-    lappend ans [list setpath MODULES_LMALTNAME foo/2&foo/lat]
+    lappend ans [list setpath MODULES_LMALTNAME foo/2&al|foo/lat]
 }
 testouterr_cmd sh {load foo/lat} $ans {}
 set ans [list]
@@ -88,10 +88,4 @@ testouterr_cmd sh {load bar/top} ERR $tserr\n$err_path'bar/top'
 #  Cleanup
 #
 
-# restore environment
-unsetenv_var TS_BAD_COMMAND_TEST
-setenv_path_var MODULEPATH $modpath
-
-unset ans
-unset mp
-unset tserr
+reset_test_env

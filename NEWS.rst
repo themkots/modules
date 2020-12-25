@@ -6,7 +6,99 @@ Release notes
 This file describes changes in recent versions of Modules. It primarily
 documents those changes that are of interest to users and admins.
 
+.. _4.7 release notes:
+
+Modules 4.7.0 (not yet released)
+--------------------------------
+
+* Doc: simplify TOC of :ref:`MIGRATING` document
+* Add the :mfvar:`ModuleTool` and :mfvar:`ModuleToolVersion` Modules
+  variables to determine during modulefile or modulerc evaluation the name and
+  version of the *module* implementation currently in use.
+* Introduce the :mfcmd:`versioncmp` modulefile command to compare two version
+  strings passed as argument.
+* Enable the use of wildcard character to designate multiple directories at
+  once in modulespath configuration file. (fix issue #125)
+* Distinguish aliases from symbolic versions in :envvar:`MODULES_LMALTNAME`
+  environment variable. Prefix these alias entries with the ``al|`` string.
+* Fetch modulefile modification time only if required by :subcmd:`list`
+  sub-command display format.
+* Use symbolic versions recorded in environment, with
+  :envvar:`MODULES_LMALTNAME` variable, to report the symbols applying to
+  loaded modules on :subcmd:`list` sub-command. Modulerc files are not
+  evaluated anymore when performing a module list.
+* Move the definition of the :envvar:`FPATH` environment variable for Modules
+  initialization on ksh shell from the initialization script of this shell to
+  the resulting output of the :subcmd:`autoinit` sub-command.
+* Introduce the ``shells_with_ksh_fpath`` configuration option to define a
+  list of shell where to ensure that any ksh sub-shell will get the module
+  function defined by use of the :envvar:`FPATH` environment variable. When
+  the ``shells_with_ksh_fpath`` option is set through the :subcmd:`config`
+  sub-command, the :envvar:`MODULES_SHELLS_WITH_KSH_FPATH` environment
+  variable is set.
+* Add the ``implicit_requirement`` configuration option to control whether a
+  prereq or a conflict requirement should be implicitly set onto modules
+  respectively specified on :mfcmd:`module load<module>` or
+  :mfcmd:`module unload<module>` commands in modulefile. Default value for
+  this option could be set at configure time with the
+  ``--enable-implicit-requirement`` option (enabled by default). This value
+  could be superseded by setting up the ``implicit_requirement`` option with
+  :subcmd:`config` sub-command. Which sets the
+  :envvar:`MODULES_IMPLICIT_REQUIREMENT` environment variable. (fix issue
+  #260)
+* Add the ``--not-req`` option to the :mfcmd:`module` modulefile command to
+  inhibit for its ``load`` and ``unload`` sub-commands the definition of a
+  prereq or conflict requirement onto specified modules.
+* Add the ``lpopState`` and ``currentState`` procedures to respectively remove
+  or return the last entry from the list of values of a given state.
+* Add the ``topState`` and ``depthState`` procedures to respectively return
+  the first element from or the number of elements in the list of values of a
+  given state.
+* Remove the pre-definition of runtime states with no specific property. These
+  basic states are defined on-the-fly which implied they are not reported on a
+  :subcmd:`module config --dump-state<config>` command unless if instanciated.
+* Introduce the ``loaded`` symbolic version among advanced version specifiers
+  (e.g. ``foo@loaded``) to designate the currently loaded version of specified
+  module. (fix issue #366)
+
+
 .. _4.6 release notes:
+
+Modules 4.6.1 (2020-11-14)
+--------------------------
+
+* Lib: implement ``initStateClockSeconds`` as a Tcl command in
+  libtclenvmodules to provide an optimized way to retrieve current Epoch time.
+* Lib: implement ``parseDateTimeArg`` as a Tcl command in libtclenvmodules to
+  provide an optimized way to convert a datetime string into an Epoch time.
+* When full module specification is equal to ``@``, raise an error as no
+  module name is provided. (fix issue #362)
+* Optimize internal recording of hidden module and tag specification when
+  parsing modulerc files in order to reduce the time taken to test if a given
+  module is hidden or if a given tag applies to it.
+* Script: add the ability to select the benchmark test to perform on
+  :command:`mb` utility.
+* Doc: add *Use new features without breaking old module command* cookbook
+  recipe
+* Doc: rework option description for :mfcmd:`module-hide` and
+  :mfcmd:`module-forbid` commands in :ref:`modulefile(4)` document.
+* Doc: describe in :ref:`diff_v3_v4` document that shell special characters
+  like backticks are escaped when used in values starting Modules 4.0. (fix
+  issue #365)
+* Doc: make the ENVIRONMENT section from :ref:`modulefile(4)` man page point
+  to the ENVIRONMENT section of :ref:`module(1)` man page.
+* Fix :subcmd:`clear` sub-command to unset the :envvar:`MODULES_LMSOURCESH`
+  environment variable. (fix issue #367)
+* Correctly return on :subcmd:`avail` sub-command a symbolic version defined
+  in a global RC file when specifically searched. (fix issue #368)
+* Fix module hiding resolution for symbolic versions defined in a global RC
+  file when :mfcmd:`module-hide` statements are set in the modulepath where
+  the modulefiles targeted by these symbols are located. (fix issue #369)
+* When a module fails to unload during a :subcmd:`purge` sub-command, preserve
+  loaded the modules it requires to keep environment consistent. (fix issue
+  #370)
+* Doc: add *Hide and forbid modules* cookbook recipe.
+
 
 Modules 4.6.0 (2020-09-16)
 --------------------------

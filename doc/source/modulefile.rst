@@ -211,7 +211,7 @@ the *modulefile* is being loaded.
 
     .. versionadded:: 4.1
 
-.. mfcmd:: module [sub-command] [sub-command-args]
+.. mfcmd:: module [sub-command] [sub-command-options] [sub-command-args]
 
  Contains the same *sub-commands* as described in the :ref:`module(1)`
  man page in the :ref:`Module Sub-Commands` section. This command permits a
@@ -221,6 +221,10 @@ the *modulefile* is being loaded.
  ``module load`` commands. For example, if every user on the system
  requires a basic set of applications loaded, then a core *modulefile*
  would contain the necessary ``module load`` commands.
+
+ The ``--not-req`` option may be set for the ``load``, ``unload`` and
+ ``switch`` sub-commands to inhibit the definition of an implicit prereq or
+ conflict requirement onto specified modules.
 
  Command line switches :option:`--auto`, :option:`--no-auto` and
  :option:`--force` are ignored when passed to a :mfcmd:`module` command set in
@@ -240,11 +244,20 @@ the *modulefile* is being loaded.
 
  * another *modulefile* alias
 
-.. mfcmd:: module-forbid [--after datetime] [--before datetime] [--not-user {user...}] [--not-group {group...}] [--message {text message}] [--nearly-message {text message}] modulefile...
+.. mfcmd:: module-forbid [options] modulefile...
 
  Forbid use of *modulefile*. An error is obtained when trying to evaluate a
  forbidden module. This command should be placed in one of the
  :file:`modulecmd.tcl` rc files.
+
+ :mfcmd:`module-forbid` command accepts the following options:
+
+ * ``--after datetime``
+ * ``--before datetime``
+ * ``--not-user {user...}``
+ * ``--not-group {group...}``
+ * ``--message {text message}``
+ * ``--nearly-message {text message}``
 
  If ``--after`` option is set, forbidding is only effective after specified
  date time. Following the same principle, if ``--before`` option is set,
@@ -283,11 +296,19 @@ the *modulefile* is being loaded.
 
     .. versionadded:: 4.6
 
-.. mfcmd:: module-hide [--soft|--hard] [--after datetime] [--before datetime] [--not-user {user...}] [--not-group {group...}] modulefile...
+.. mfcmd:: module-hide [options] modulefile...
 
  Hide *modulefile* to exclude it from available module search or module
  selection unless query refers to *modulefile* by its exact name. This command
  should be placed in one of the :file:`modulecmd.tcl` rc files.
+
+ :mfcmd:`module-hide` command accepts the following options:
+
+ * ``--soft|--hard``
+ * ``--after datetime``
+ * ``--before datetime``
+ * ``--not-user {user...}``
+ * ``--not-group {group...}``
 
  When ``--soft`` option is set, *modulefile* is also set hidden, but hiding is
  disabled when search or selection query's root name matches module's root
@@ -678,6 +699,16 @@ the *modulefile* is being loaded.
  :mfcmd:`unsetenv` command changes the process' environment like
  :mfcmd:`setenv`.
 
+.. mfcmd:: versioncmp version1 version2
+
+ Compare version string *version1* against version string *version2*. Returns
+ ``-1``, ``0`` or ``1`` respectively if *version1* is less than, equal to or
+ greater than *version2*.
+
+ .. only:: html
+
+    .. versionadded:: 4.7
+
 .. mfcmd:: x-resource [resource-string|filename]
 
  Merge resources into the X11 resource database. The resources are used to
@@ -711,8 +742,30 @@ the *modulefile* is being loaded.
 Modules Variables
 -----------------
 
-The ``ModulesCurrentModulefile`` variable contains the full pathname of
-the *modulefile* being interpreted.
+.. mfvar:: ModulesCurrentModulefile
+
+ The :mfvar:`ModulesCurrentModulefile` variable contains the full pathname of
+ the *modulefile* being interpreted.
+
+.. mfvar:: ModuleTool
+
+ The :mfvar:`ModuleTool` variable contains the name of the *module*
+ implementation currently in use. The value of this variable is set to
+ ``Modules`` for this implementation.
+
+ .. only:: html
+
+    .. versionadded:: 4.7
+
+.. mfvar:: ModuleToolVersion
+
+ The :mfvar:`ModuleToolVersion` variable contains the version of the *module*
+ implementation currently in use. The value of this variable is set to
+ |code version| for this version of Modules.
+
+ .. only:: html
+
+    .. versionadded:: 4.7
 
 .. _Locating Modulefiles:
 
@@ -942,10 +995,8 @@ additional descriptive information about the *modulefile*.
 ENVIRONMENT
 -----------
 
-.. envvar:: MODULEPATH
-
- Path of directories containing *modulefiles*.
-
+See the :ref:`ENVIRONMENT<module ENVIRONMENT>` section in the
+:ref:`module(1)` man page.
 
 SEE ALSO
 --------

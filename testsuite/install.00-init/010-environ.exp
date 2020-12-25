@@ -52,6 +52,9 @@ if {[info exists install_quarlist]} {
 # clean any automated handling mode configuration
 catch {unset env(MODULES_AUTO_HANDLING)}
 
+# ensure tests are run with implicit requirement enabled
+set env(MODULES_IMPLICIT_REQUIREMENT) 1
+
 # clean any in depth mode configuration
 catch {unset env(MODULES_AVAIL_INDEPTH)}
 
@@ -66,6 +69,11 @@ catch {unset env(MODULES_SEARCH_MATCH)}
 
 # clean any set shell startup config
 catch {unset env(MODULES_SET_SHELL_STARTUP)}
+
+# clean any shells defined to get ksh fpath set
+catch {unset env(MODULES_SHELLS_WITH_KSH_FPATH)}
+catch {unset env(FPATH)}
+catch {unset env(FPATH_modshare)}
 
 # clean any pager configuration
 catch {unset env(LESS)}
@@ -106,6 +114,8 @@ catch {unset env(BASH_FUNC_module\(\))}
 catch {unset env(BASH_FUNC_module%%)}
 catch {unset env(BASH_FUNC__module_raw\(\))}
 catch {unset env(BASH_FUNC__module_raw%%)}
+
+catch {unset env(MODULERCFILE)}
 
 # setup basic locale for tests
 set env(LANG) "C"

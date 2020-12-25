@@ -223,6 +223,10 @@ proc err_unablelocate {mod} {
     return "$::error_msgs: Unable to locate a modulefile for '$mod'"
 }
 
+proc err_noloaded {mod} {
+    return "$::error_msgs: No loaded version found for '$mod' module"
+}
+
 proc msg_moderr {msg cmdline modfile linenum {pad {}} {procname {}} {contact {}} {custom {}}} {
     set linefile [expr {$procname ne {} || $linenum eq {} ? {} : " line $linenum"}]
     set errcontact [expr {$contact eq {} ? $::err_contactns : "Please contact <$contact>"}]
@@ -502,6 +506,9 @@ proc siteconfig_isStderrTty {} {
     return $is_stderr_tty
 }
 
+# determine if stdin is attached to a tty
+set is_stdin_tty [expr {![catch {fconfigure stdin -mode}]}]
+
 # locate Modules Tcl extension library used during testsuite
 if {$install_libtclenvmodules eq {y}} {
     catch {set tclextlib_file [glob lib/libtclenvmodules*]}
@@ -596,7 +603,7 @@ set userfgroup [lindex $usergroups 0]
 
 # escape regexp chars in string
 proc escre {str} {
-    return [regsub -all {([.?()+\[\]$])} $str {\\\1}]
+    return [string map {<EXM> (.*)+} [regsub -all {([.?()+\[\]$])} $str {\\\1}]]
 }
 
 # Dictionary-style string comparison
